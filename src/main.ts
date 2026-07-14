@@ -1,38 +1,26 @@
-// Boots genesis in a worker, then mounts the system view (the 3D orrery) and
-// the globe view (the planet itself) once the world lands. Both share one
-// renderer; a temporary 'g' keyboard toggle switches which is on screen —
-// Task 10 replaces that with the real zoom + URL-state wiring (AppState,
-// src/state/url.ts) that will pick a view from the shared link instead.
+// Boots genesis in a worker, resolves the shared URL state (seed/view/day
+// — src/state/url.ts), then mounts BOTH views for good: the system view
+// (the 3D orrery, Task 8) and the globe view (the planet itself, Task 9)
+// live on two stacked canvases that cross-fade via CSS opacity, while the
+// system camera dollies toward the world's own position as the zoom
+// (src/views/zoom.ts) eases between them. One shared rAF loop owns `day`.
+// Deep links round-trip through `history.replaceState` (no reload, no
+// scroll-jack) — the one exception is a hand-edited `#seed=`, which reloads
+// the page: a live reroll-without-reload is out of this task's scope (see
+// `onReroll`'s stub below).
 import * as THREE from 'three';
 import './styles.css';
 import { buildHud, type HudCallbacks } from './ui/hud';
 import { clockToDay } from './time/clock';
 import { createSystemView } from './views/system';
 import { createGlobeView, RELIEF_EXAGGERATION } from './views/globe';
+import { ZoomController, dollyLookAt, dollyPosition, type ZoomTarget } from './views/zoom';
 import type { SystemScene, TilesScene } from './sim/scene';
+import { defaultAppState, parseAppState, seedError, serializeAppState, type AppState } from './state/url';
+import { randomSeed } from './ui/seed';
+import type { WorkerErrorKind } from './sim/worker';
 
 const app = document.getElementById('app')!;
-
-const status = document.createElement('pre');
-status.className = 'status';
-status.textContent = 'generating…';
-app.append(status);
-
-const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
-
-worker.onmessage = (ev: MessageEvent) => {
-  const msg = ev.data;
-  if (msg.type === 'world') {
-    status.remove();
-    mountViews(msg.system, msg.tiles);
-  } else if (msg.type === 'error') {
-    // Genesis-refused replies render the message verbatim — the sim's
-    // physical reason is the UI copy.
-    status.textContent = msg.message;
-  }
-};
-
-worker.postMessage({ type: 'generate', seed: '42', tilesWidth: 512 });
 
 /** Default orrery playback rate: a full year sweeps by in ~12 real seconds. */
 function defaultDaysPerSecond(sys: SystemScene): number {
@@ -40,22 +28,109 @@ function defaultDaysPerSecond(sys: SystemScene): number {
 }
 
 const SPACE_CAPTION =
-  'schematic scale: the world’s orbit is to true AU scale, but moon orbits are compressed onto even rungs for legibility — not to true distance. Press "g" to switch views.';
-const GROUND_CAPTION = `relief is exaggerated ${RELIEF_EXAGGERATION}× over true scale so mountains and trenches read on a rendered sphere at all — not to true height. Press "g" to switch views.`;
+  'schematic scale: the world’s orbit is to true AU scale, but moon orbits are compressed onto even rungs for legibility — not to true distance.';
+const GROUND_CAPTION = `relief is exaggerated ${RELIEF_EXAGGERATION}× over true scale so mountains and trenches read on a rendered sphere at all — not to true height.`;
 
-function mountViews(system: SystemScene, tiles: TilesScene): void {
-  const canvas = document.createElement('canvas');
-  canvas.className = 'orrery-canvas';
-  app.append(canvas);
+/** The plain "still generating" state — replaced by either a mounted world
+ * or one of `renderError`'s distinct failure screens. */
+function renderStatus(message: string): void {
+  app.innerHTML = '';
+  const pre = document.createElement('pre');
+  pre.className = 'status';
+  pre.textContent = message;
+  app.append(pre);
+}
+
+/** One of this app's honest-error surfaces: a full-screen, named, styled
+ * state — never a silent blank canvas. `kind` picks the heading and the
+ * `.error-<kind>` accent color; `message` is the underlying reason
+ * verbatim (the sim's genesis-refusal text, or the wasm URL, or both
+ * schema strings, depending on `kind` — see src/sim/worker.ts). */
+function renderError(kind: WorkerErrorKind | 'seed-parse', title: string, message: string, seed?: string): void {
+  app.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = `error-screen error-${kind}`;
+  const heading = document.createElement('h1');
+  heading.textContent = title;
+  el.append(heading);
+  if (seed !== undefined) {
+    const seedLine = document.createElement('p');
+    seedLine.className = 'error-seed';
+    seedLine.textContent = `seed ${seed}`;
+    el.append(seedLine);
+  }
+  const body = document.createElement('pre');
+  body.textContent = message;
+  el.append(body);
+  app.append(el);
+}
+
+function titleFor(kind: WorkerErrorKind): string {
+  switch (kind) {
+    case 'catalog-fetch':
+      return 'catalog unavailable';
+    case 'genesis':
+      return 'genesis refused this seed';
+    case 'schema':
+      return 'scene document mismatch';
+    case 'unknown':
+    default:
+      return 'unexpected error';
+  }
+}
+
+/** Resolves the app's starting `AppState` from the URL hash and boots
+ * genesis for it — or, if the hash names an unparseable seed, shows that
+ * parse error instead of ever touching the worker. */
+function boot(): void {
+  const hashSeedError = seedError(location.hash);
+  if (hashSeedError) {
+    renderError('seed-parse', 'invalid seed in URL', hashSeedError);
+    return;
+  }
+  const state = parseAppState(location.hash) ?? defaultAppState(randomSeed());
+  // Canonicalize immediately (leading zeros stripped, defaults omitted) so
+  // the address bar reflects exactly what's about to render, even before
+  // genesis lands — a link copied while generating is already correct.
+  history.replaceState(null, '', serializeAppState(state));
+
+  renderStatus('generating…');
+
+  const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
+
+  worker.onmessage = (ev: MessageEvent) => {
+    const msg = ev.data;
+    if (msg.type === 'world') {
+      mountViews(msg.system, msg.tiles, state);
+    } else if (msg.type === 'error') {
+      const kind = msg.kind as WorkerErrorKind;
+      renderError(kind, titleFor(kind), msg.message, state.seed);
+    }
+  };
+
+  worker.postMessage({ type: 'generate', seed: state.seed, tilesWidth: 512 });
+}
+
+function mountViews(system: SystemScene, tiles: TilesScene, state: AppState): void {
+  app.innerHTML = '';
+
+  const stage = document.createElement('div');
+  stage.className = 'view-stage';
+  const systemCanvas = document.createElement('canvas');
+  systemCanvas.className = 'view-canvas';
+  const globeCanvas = document.createElement('canvas');
+  globeCanvas.className = 'view-canvas';
+  stage.append(systemCanvas, globeCanvas);
+  app.append(stage);
 
   const caption = document.createElement('div');
   caption.className = 'scale-caption';
-  caption.textContent = SPACE_CAPTION;
   app.append(caption);
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const systemRenderer = new THREE.WebGLRenderer({ canvas: systemCanvas, antialias: true });
+  systemRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const globeRenderer = new THREE.WebGLRenderer({ canvas: globeCanvas, antialias: true });
+  globeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   // The system view: the schematic AU-scale orrery (Task 8).
   const systemScene = new THREE.Scene();
@@ -64,18 +139,23 @@ function mountViews(system: SystemScene, tiles: TilesScene): void {
   const systemView = createSystemView(system);
   systemScene.add(systemView.object3d);
   const systemReach = Math.max(system.world.orbitAu, system.star.hzOuterAu) * 3 + 2;
+  const systemFraming = new THREE.Vector3(0, systemReach * 0.6, systemReach);
   const systemCamera = new THREE.PerspectiveCamera(
     50,
     window.innerWidth / window.innerHeight,
     0.05,
     systemReach * 20,
   );
-  systemCamera.position.set(0, systemReach * 0.6, systemReach);
+  systemCamera.position.copy(systemFraming);
   systemCamera.lookAt(0, 0, 0);
 
   // The globe view: the planet itself (Task 9) — real relief, biome/ocean
   // colors, settlement markers, an honest day/night terminator. No ambient
-  // light in this scene: the night side is meant to fall dark.
+  // light in this scene: the night side is meant to fall dark. That's also
+  // why the two views are cross-faded as two whole canvases (CSS opacity)
+  // rather than merged into one shared THREE.Scene — a shared scene would
+  // permanently leak the system view's ambient wash onto the globe's night
+  // side, not just during the ~1.5s transition.
   const globeScene = new THREE.Scene();
   globeScene.background = new THREE.Color(0x000000);
   const globeView = createGlobeView(tiles, system);
@@ -85,35 +165,79 @@ function mountViews(system: SystemScene, tiles: TilesScene): void {
   globeCamera.position.set(0, globeReach * 0.4, globeReach);
   globeCamera.lookAt(0, 0, 0);
 
-  let showGlobe = false;
-  window.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'g') return;
-    showGlobe = !showGlobe;
-    caption.textContent = showGlobe ? GROUND_CAPTION : SPACE_CAPTION;
-  });
+  // The zoom itself (src/views/zoom.ts): CLOSE_OFFSET is a small, arbitrary
+  // "just arrived" framing for the system camera's dolly target (aesthetic,
+  // preview-tuned, not a physical scale) — it lands here as the globe
+  // canvas finishes fading in and takes over.
+  const CLOSE_OFFSET = new THREE.Vector3(0, 0.3, 0.6);
+  const zoom = new ZoomController();
+  let view: ZoomTarget = state.view;
+  zoom.jumpTo(view); // the initial view from a deep link never animates in
 
-  window.addEventListener('resize', () => {
-    renderer.setSize(window.innerWidth, window.innerHeight);
+  function setCaptionFor(v: ZoomTarget): void {
+    caption.textContent = v === 'system' ? SPACE_CAPTION : GROUND_CAPTION;
+  }
+  function setViewButtonFor(v: ZoomTarget): void {
+    hud.setViewButton(v === 'system' ? 'view: globe' : 'view: system', true);
+  }
+
+  function resize(): void {
+    systemRenderer.setSize(window.innerWidth, window.innerHeight);
+    globeRenderer.setSize(window.innerWidth, window.innerHeight);
     const aspect = window.innerWidth / window.innerHeight;
     systemCamera.aspect = aspect;
     systemCamera.updateProjectionMatrix();
     globeCamera.aspect = aspect;
     globeCamera.updateProjectionMatrix();
-  });
+  }
+  resize();
+  window.addEventListener('resize', resize);
 
   const hudRoot = document.createElement('div');
   app.append(hudRoot);
 
   let paused = false;
-  const daysPerSecond = defaultDaysPerSecond(system);
+  let daysPerSecond = defaultDaysPerSecond(system);
   let playStartMs = performance.now();
-  let dayAtPlayStart = 0;
-  let day = 0;
+  let dayAtPlayStart = state.day;
+  let day = state.day;
+
+  /** Writes `seed`/`view`/`day` back to the URL via `replaceState` — no
+   * reload, no scroll-jack. Throttled to ~1/s during autoplay (`force`
+   * bypasses that for a discrete user action: toggling the view or
+   * scrubbing) so a live playthrough doesn't hammer the History API every
+   * frame while still keeping a copied link close to current. */
+  let lastUrlSyncMs = 0;
+  function syncUrl(force = false): void {
+    const now = performance.now();
+    if (!force && now - lastUrlSyncMs < 1000) return;
+    lastUrlSyncMs = now;
+    const hash = serializeAppState({ seed: state.seed, view, day });
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+  }
+
+  function toggleView(): void {
+    view = view === 'system' ? 'globe' : 'system';
+    zoom.setTarget(view, performance.now());
+    setCaptionFor(view);
+    setViewButtonFor(view);
+    syncUrl(true);
+  }
 
   function renderFrame(): void {
     systemView.update(day);
     globeView.update(day);
-    renderer.render(showGlobe ? globeScene : systemScene, showGlobe ? globeCamera : systemCamera);
+
+    const z = zoom.stateAt(performance.now());
+    const worldPos = systemView.worldPosition(day);
+    systemCamera.position.copy(dollyPosition(systemFraming, worldPos, CLOSE_OFFSET, z.value));
+    systemCamera.lookAt(dollyLookAt(worldPos, z.value));
+
+    systemCanvas.style.opacity = String(z.systemOpacity);
+    globeCanvas.style.opacity = String(z.globeOpacity);
+
+    systemRenderer.render(systemScene, systemCamera);
+    globeRenderer.render(globeScene, globeCamera);
   }
 
   const cb: HudCallbacks = {
@@ -128,25 +252,65 @@ function mountViews(system: SystemScene, tiles: TilesScene): void {
       }
       hud.setPaused(paused);
     },
-    // Speed/true-scale/reroll/share/date-jump/view-toggle belong to the
-    // calendar clock and Task 10's URL-state wiring — no-ops here.
-    onSpeed() {},
+    onSpeed(mult) {
+      // SPEED_STEPS' `mult` is sim-seconds-elapsed per real second (its
+      // labels read that way — "1 day/s" is mult=86400); daysPerSecond
+      // wants sim-days per real second, hence the /86400.
+      daysPerSecond = mult / 86400;
+      playStartMs = performance.now();
+      dayAtPlayStart = day;
+    },
+    // True-scale toggle, reroll, share-link copy, and the calendar
+    // date-jump aren't part of this task — no-ops, same as before Task 10.
     onTrueScale() {},
     onReroll() {},
     onShare() {},
     onDateJump() {},
-    onToggleView() {},
+    onToggleView: toggleView,
     onScrub(scrubbedDay) {
       day = scrubbedDay;
       playStartMs = performance.now();
       dayAtPlayStart = day;
       renderFrame();
+      syncUrl(true);
     },
   };
   const hud = buildHud(hudRoot, String(system.seed), cb);
-  hud.setViewButton('', false);
+  setCaptionFor(view);
+  setViewButtonFor(view);
   hud.setDayRange(system.world.yearDays);
   hud.setMaxSpeed(null);
+  hud.setDay(day % system.world.yearDays);
+
+  // Reading the URL happens once at boot (above, via `boot()`'s initial
+  // state) plus here on `hashchange` — a user editing the address bar by
+  // hand repositions the live view/day in place. A different seed is the
+  // one case that reloads (see the module doc comment).
+  window.addEventListener('hashchange', () => {
+    const hashErr = seedError(location.hash);
+    if (hashErr) {
+      renderError('seed-parse', 'invalid seed in URL', hashErr);
+      return;
+    }
+    const next = parseAppState(location.hash);
+    if (!next) return;
+    if (next.seed !== state.seed) {
+      location.reload();
+      return;
+    }
+    if (next.view !== view) {
+      view = next.view;
+      zoom.setTarget(view, performance.now());
+      setCaptionFor(view);
+      setViewButtonFor(view);
+    }
+    if (Math.abs(next.day - day) > 1e-9) {
+      day = next.day;
+      dayAtPlayStart = day;
+      playStartMs = performance.now();
+      hud.setDay(day % system.world.yearDays);
+    }
+  });
 
   function frame(): void {
     if (!paused) {
@@ -154,7 +318,10 @@ function mountViews(system: SystemScene, tiles: TilesScene): void {
       hud.setDay(day % system.world.yearDays);
     }
     renderFrame();
+    syncUrl();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 }
+
+boot();

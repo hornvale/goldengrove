@@ -11,6 +11,11 @@ export class CatalogError extends Error {
   }
 }
 
+/** The wasm binary itself couldn't be fetched — distinct from a genesis
+ * refusal or a malformed scene document (both require the binary to have
+ * loaded first), so a caller can name the wasm URL rather than a seed. */
+export class CatalogFetchError extends CatalogError {}
+
 interface HwExports {
   memory: WebAssembly.Memory;
   hw_new(seed: bigint): number;
@@ -60,7 +65,7 @@ export interface Catalog {
 /** Fetch and instantiate the world-wasm catalog at `wasmUrl`. */
 export async function loadCatalog(wasmUrl: string): Promise<Catalog> {
   const res = await fetch(wasmUrl);
-  if (!res.ok) throw new CatalogError(`catalog fetch failed: ${res.status} ${wasmUrl}`, -100);
+  if (!res.ok) throw new CatalogFetchError(`catalog fetch failed: ${res.status} ${wasmUrl}`, -100);
   const { instance } = await WebAssembly.instantiate(await res.arrayBuffer(), {});
   const e = instance.exports as unknown as HwExports;
   const check = (code: number) => {
