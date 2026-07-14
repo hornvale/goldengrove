@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SimClock } from './clock';
+import { clockToDay, SimClock } from './clock';
 
 describe('SimClock', () => {
   it('accumulates wall time scaled by speed', () => {
@@ -14,5 +14,15 @@ describe('SimClock', () => {
     c.paused = true;
     c.tick(10);
     expect(c.t).toBe(0);
+  });
+});
+
+describe('clockToDay', () => {
+  it('scales elapsed wall time by the days/second rate', () => {
+    expect(clockToDay(2000, 5)).toBeCloseTo(10);
+  });
+
+  it('is zero at zero elapsed time regardless of rate', () => {
+    expect(clockToDay(0, 100)).toBe(0);
   });
 });

@@ -43,6 +43,10 @@ export interface HudCallbacks {
   onShare(): void;
   onDateJump(year: number, dayOfYear: number): void;
   onToggleView(): void;
+  /** The day scrubber was dragged to `day` (raw ephemeris day units, not a
+   * calendar date) — the caller repositions the view and rebases autoplay
+   * from here. */
+  onScrub(day: number): void;
 }
 
 export interface Hud {
@@ -54,6 +58,11 @@ export interface Hud {
   setMaxSpeed(maxMult: number | null): void;
   setTrueScaleLabel(label: string): void;
   setTrueScaleActive(on: boolean): void;
+  /** The scrubber's max day (its full-range extent, e.g. one world year). */
+  setDayRange(maxDay: number): void;
+  /** Moves the scrubber to `day` without firing onScrub — for autoplay
+   * driving the slider, as opposed to the user dragging it. */
+  setDay(day: number): void;
 }
 
 export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud {
@@ -114,7 +123,27 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
     bottom.append(b);
   }
 
-  root.append(topLeft, topRight, bottom);
+  // The orrery's day scrubber — a distinct control from the calendar
+  // play/speed row above: it drags a raw ephemeris `day` (the system view's
+  // native unit), not a calendar date. Dragging it fires onScrub;
+  // setDay() moves it back without re-firing (autoplay driving the UI).
+  const scrubberRow = el('div', 'hud hud-scrubber');
+  const dayLabel = el('span', '', 'day 0');
+  const scrub = document.createElement('input');
+  scrub.type = 'range';
+  scrub.name = 'day-scrubber';
+  scrub.min = '0';
+  scrub.max = '1000'; // placeholder — the caller sets the real range via setDayRange() once a world loads
+  scrub.step = '0.01';
+  scrub.value = '0';
+  scrub.addEventListener('input', () => {
+    const day = Number(scrub.value);
+    dayLabel.textContent = `day ${day.toFixed(1)}`;
+    cb.onScrub(day);
+  });
+  scrubberRow.append(scrub, dayLabel);
+
+  root.append(topLeft, topRight, bottom, scrubberRow);
   const hud: Hud = {
     setDate: (s) => { date.textContent = s; },
     setPaused: (p) => { play.textContent = p ? '▶' : '⏸'; },
@@ -136,6 +165,11 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
     },
     setTrueScaleLabel: (label) => { trueScale.textContent = label; },
     setTrueScaleActive: (on) => { trueScale.classList.toggle('active', on); },
+    setDayRange: (maxDay) => { scrub.max = String(maxDay); },
+    setDay: (day) => {
+      scrub.value = String(day);
+      dayLabel.textContent = `day ${day.toFixed(1)}`;
+    },
   };
   hud.setActiveSpeed(1);
   return hud;

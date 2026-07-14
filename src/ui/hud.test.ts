@@ -18,7 +18,7 @@ describe('formatDate', () => {
 });
 
 describe('buildHud interactions', () => {
-  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {} };
+  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {}, onScrub(_: number) {} };
 
   it('share button fires onShare and flashes', () => {
     const root = document.createElement('div');
@@ -96,6 +96,34 @@ describe('buildHud interactions', () => {
     // clicking never toggles it on its own — only the explicit setter does
     btn.click();
     expect(btn.classList.contains('active')).toBe(false);
+  });
+
+  it('dragging the day scrubber fires onScrub with the parsed day', () => {
+    const root = document.createElement('div');
+    let got: number | null = null;
+    buildHud(root, '42', { ...noop, onScrub: (day) => { got = day; } });
+    const scrub = root.querySelector('input[name="day-scrubber"]') as HTMLInputElement;
+    scrub.value = '12.5';
+    scrub.dispatchEvent(new Event('input'));
+    expect(got).toBe(12.5);
+  });
+
+  it('setDay moves the scrubber without firing onScrub', () => {
+    const root = document.createElement('div');
+    let scrubs = 0;
+    const hud = buildHud(root, '42', { ...noop, onScrub: () => { scrubs++; } });
+    const scrub = root.querySelector('input[name="day-scrubber"]') as HTMLInputElement;
+    hud.setDay(30);
+    expect(scrub.value).toBe('30');
+    expect(scrubs).toBe(0); // autoplay driving the UI must not loop back as a user scrub
+  });
+
+  it('setDayRange sets the scrubber max', () => {
+    const root = document.createElement('div');
+    const hud = buildHud(root, '42', noop);
+    hud.setDayRange(368.05357);
+    const scrub = root.querySelector('input[name="day-scrubber"]') as HTMLInputElement;
+    expect(scrub.max).toBe('368.05357');
   });
 
   it('view-toggle button is controllable', () => {

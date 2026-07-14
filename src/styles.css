@@ -13,8 +13,13 @@ canvas { display: block; }
 .hud-top-left { top: 12px; left: 12px; }
 .hud-top-right { top: 12px; right: 12px; }
 .hud-bottom { bottom: 12px; left: 50%; transform: translateX(-50%); }
+.hud-scrubber { bottom: 56px; left: 50%; transform: translateX(-50%); width: 340px; }
+.hud-scrubber input[type="range"] { flex: 1; }
 .body-label { color: #9fb0c8; font-size: 0.7rem; text-shadow: 0 0 4px #000;
   pointer-events: none; white-space: nowrap; }
+.scale-caption { position: absolute; left: 12px; bottom: 12px; max-width: 260px;
+  font-size: 0.65rem; color: #6f7d99; pointer-events: none; }
+.status { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 .hud-compass { bottom: 56px; left: 50%; transform: translateX(-50%); flex-direction: column;
   padding: 0.25rem 0.5rem; gap: 0; width: 288px; }
 .compass-window { position: relative; width: 100%; height: 16px; overflow: hidden; }
