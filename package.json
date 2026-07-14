@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "wasm:local": "mkdir -p public && cp /Users/nathan/Projects/hornvale/hornvale/.claude/worktrees/goldengrove/clients/world-wasm/target/wasm32-unknown-unknown/release/hornvale_world_wasm.wasm public/hornvale_world.wasm"
   },
   "dependencies": {
     "three": "^0.166.0"

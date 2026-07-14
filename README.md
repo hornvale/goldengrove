@@ -8,3 +8,20 @@ Lineage: the three.js views descend from bitterbridge/goldengrove; the
 ephemeris/scene modules from hornvale's retired in-book orrery client.
 Presentation here is deliberately non-deterministic (hornvale decision
 0022: the sim emits data, clients render). MIT.
+
+## Dev
+
+The catalog (`public/hornvale_world.wasm`) is never committed (decision
+0052's regime) — CI fetches the release build, and locally you build it
+yourself:
+
+```bash
+npm run wasm:local   # copies the release wasm into public/
+npm test
+npm run build
+```
+
+`wasm:local` currently builds from the campaign worktree
+(`hornvale/.claude/worktrees/goldengrove/clients/world-wasm`), since the
+sibling `../hornvale` checkout layout doesn't exist yet.
+# TODO(campaign-close): retarget to ../hornvale once the branch merges
