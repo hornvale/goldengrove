@@ -35,13 +35,34 @@ export interface SystemScene {
   moons: MoonElem[];
 }
 
-/** The fields of a `scene/tiles/v1` document the orrery's globe needs. */
+/** A named point on the `scene/tiles/v1` lattice (`windows/scene`'s
+ * `Feature`) — settlements today, the flagship last under its own kind. */
+export interface Feature {
+  name: string;
+  kind: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** The fields of a `scene/tiles/v1` document the orrery's globe needs.
+ * `elevation_m`/`sea_level_m` keep the wire's snake_case names because
+ * `sampleTile` (./views/globe.ts) indexes the per-tile arrays generically by
+ * that literal key; `biomeLegend`/`features` are read by property, not by
+ * generic key, so those camelCase like the system-scene elements do. */
 export interface TilesScene {
   schema: string;
   width: number;
   height: number;
   sea_level_m: number;
   elevation_m: number[];
+  /** Whether each tile is ocean (sea level baked in) — row-major, matching `elevation_m`. */
+  ocean: boolean[];
+  /** Biome per tile, as an index into `biomeLegend` — row-major, matching `elevation_m`. */
+  biome: number[];
+  /** The full biome catalog, in stable order; `biome`'s indices key into this by position. */
+  biomeLegend: string[];
+  /** Named points: settlements, the flagship last. */
+  features: Feature[];
 }
 
 /** A scene document violated the contract; the message names how. */
@@ -146,6 +167,33 @@ function numberArray(doc: Record<string, unknown>, key: string, length: number):
   return value as number[];
 }
 
+function booleanArray(doc: Record<string, unknown>, key: string, length: number): boolean[] {
+  const value = doc[key];
+  if (!Array.isArray(value) || value.length !== length) {
+    fail(`${key} must be an array of ${length} booleans`);
+  }
+  for (const v of value) if (typeof v !== "boolean") fail(`${key} holds a non-boolean`);
+  return value as boolean[];
+}
+
+function stringArray(doc: Record<string, unknown>, key: string): string[] {
+  const value = doc[key];
+  if (!Array.isArray(value)) fail(`${key} must be an array`);
+  for (const v of value) if (typeof v !== "string") fail(`${key} holds a non-string`);
+  return value as string[];
+}
+
+function parseFeature(doc: unknown): Feature {
+  const feature = doc as Record<string, unknown>;
+  if (typeof feature !== "object" || feature === null) fail("a feature must be an object");
+  return {
+    name: requireString(feature, "name"),
+    kind: requireString(feature, "kind"),
+    latitude: requireNumber(feature, "latitude"),
+    longitude: requireNumber(feature, "longitude"),
+  };
+}
+
 /** Parse and validate a scene/tiles/v1 document; throw SceneFormatError naming any violation. */
 export function parseTiles(text: string): TilesScene {
   const doc = parseDocument(text);
@@ -162,11 +210,17 @@ export function parseTiles(text: string): TilesScene {
   }
   const seaLevelM = requireNumber(doc, "sea_level_m");
   const tiles = width * height;
+  const features = doc.features;
+  if (!Array.isArray(features)) fail("features must be an array");
   return {
     schema: TILES_SCHEMA,
     width,
     height,
     sea_level_m: seaLevelM,
     elevation_m: numberArray(doc, "elevation_m", tiles),
+    ocean: booleanArray(doc, "ocean", tiles),
+    biome: numberArray(doc, "biome", tiles),
+    biomeLegend: stringArray(doc, "biome_legend"),
+    features: features.map(parseFeature),
   };
 }

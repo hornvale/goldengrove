@@ -83,6 +83,10 @@ function validTiles(): Record<string, unknown> {
     height: 8,
     sea_level_m: 100.0,
     elevation_m: Array(tiles).fill(50.0),
+    ocean: Array(tiles).fill(false),
+    biome: Array(tiles).fill(0),
+    biome_legend: ['temperate-forest'],
+    features: [{ name: 'Anchorhold', kind: 'flagship', latitude: 12.5, longitude: -3.25 }],
   };
 }
 
@@ -110,5 +114,38 @@ describe('parseTiles', () => {
     const doc = validTiles();
     (doc.elevation_m as number[]).push(1.0);
     expect(() => parseTiles(JSON.stringify(doc))).toThrow('elevation_m');
+  });
+
+  it('maps ocean/biome/biome_legend/features onto camelCase names', () => {
+    const t = parseTiles(JSON.stringify(validTiles()));
+    expect(t.ocean.length).toEqual(128);
+    expect(t.ocean.every((o) => o === false)).toBe(true);
+    expect(t.biome.length).toEqual(128);
+    expect(t.biomeLegend).toEqual(['temperate-forest']);
+    expect(t.features).toEqual([{ name: 'Anchorhold', kind: 'flagship', latitude: 12.5, longitude: -3.25 }]);
+  });
+
+  it('rejects a mismatched ocean length', () => {
+    const doc = validTiles();
+    (doc.ocean as boolean[]).push(true);
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('ocean');
+  });
+
+  it('rejects a mismatched biome length', () => {
+    const doc = validTiles();
+    (doc.biome as number[]).push(0);
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('biome');
+  });
+
+  it('rejects features that are not an array', () => {
+    const doc = validTiles();
+    doc.features = 'not an array';
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('features');
+  });
+
+  it('rejects a feature missing a required field', () => {
+    const doc = validTiles();
+    doc.features = [{ name: 'Anchorhold', kind: 'flagship', latitude: 1 }];
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('longitude');
   });
 });

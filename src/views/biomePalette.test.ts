@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BIOME_COUNT, BIOME_RGB, biomeColor } from './biomePalette';
+import { BIOME_COUNT, BIOME_RGB, biomeColor, biomeColorForName } from './biomePalette';
 
 describe('BIOME_RGB', () => {
   it('has exactly BIOME_COUNT rows', () => {
@@ -44,5 +44,30 @@ describe('biomeColor', () => {
     expect(r).toBeLessThanOrEqual(255);
     expect(g).toBeLessThanOrEqual(255);
     expect(b).toBeLessThanOrEqual(255);
+  });
+});
+
+describe('biomeColorForName', () => {
+  it('resolves an exact-match legend name to its gg row', () => {
+    expect(biomeColorForName('tundra')).toEqual(BIOME_RGB[4]); // Tundra
+    expect(biomeColorForName('temperate-forest')).toEqual(BIOME_RGB[6]); // TemperateForest
+    expect(biomeColorForName('savanna')).toEqual(BIOME_RGB[8]); // Savanna
+    expect(biomeColorForName('tropical-rainforest')).toEqual(BIOME_RGB[9]); // TropicalRainforest
+  });
+
+  it('derives a name with no gg counterpart as a blend between its two nearest rows', () => {
+    const [r, g, b] = biomeColorForName('shrubland');
+    const grassland = BIOME_RGB[7]!;
+    const savanna = BIOME_RGB[8]!;
+    expect(r).toBeGreaterThanOrEqual(Math.min(grassland[0], savanna[0]));
+    expect(r).toBeLessThanOrEqual(Math.max(grassland[0], savanna[0]));
+    expect(g).toBeGreaterThanOrEqual(Math.min(grassland[1], savanna[1]));
+    expect(g).toBeLessThanOrEqual(Math.max(grassland[1], savanna[1]));
+    expect(b).toBeGreaterThanOrEqual(Math.min(grassland[2], savanna[2]));
+    expect(b).toBeLessThanOrEqual(Math.max(grassland[2], savanna[2]));
+  });
+
+  it('falls back to AlpineRock grey for an unrecognized name', () => {
+    expect(biomeColorForName('not-a-real-biome')).toEqual([141, 133, 120]);
   });
 });

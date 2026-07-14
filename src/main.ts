@@ -1,13 +1,15 @@
-// Boots genesis in a worker, then mounts the system view (the 3D orrery)
-// once the world lands. The globe view (Task 9) and the URL-state/zoom
-// wiring around AppState (Task 10, src/state/url.ts) join this loop later;
-// for now the seed is fixed at 42, matching the harvested boot stub.
+// Boots genesis in a worker, then mounts the system view (the 3D orrery) and
+// the globe view (the planet itself) once the world lands. Both share one
+// renderer; a temporary 'g' keyboard toggle switches which is on screen —
+// Task 10 replaces that with the real zoom + URL-state wiring (AppState,
+// src/state/url.ts) that will pick a view from the shared link instead.
 import * as THREE from 'three';
 import './styles.css';
 import { buildHud, type HudCallbacks } from './ui/hud';
 import { clockToDay } from './time/clock';
 import { createSystemView } from './views/system';
-import type { SystemScene } from './sim/scene';
+import { createGlobeView, RELIEF_EXAGGERATION } from './views/globe';
+import type { SystemScene, TilesScene } from './sim/scene';
 
 const app = document.getElementById('app')!;
 
@@ -22,7 +24,7 @@ worker.onmessage = (ev: MessageEvent) => {
   const msg = ev.data;
   if (msg.type === 'world') {
     status.remove();
-    mountSystemView(msg.system);
+    mountViews(msg.system, msg.tiles);
   } else if (msg.type === 'error') {
     // Genesis-refused replies render the message verbatim — the sim's
     // physical reason is the UI copy.
@@ -37,37 +39,66 @@ function defaultDaysPerSecond(sys: SystemScene): number {
   return sys.world.yearDays / 12;
 }
 
-function mountSystemView(system: SystemScene): void {
+const SPACE_CAPTION =
+  'schematic scale: the world’s orbit is to true AU scale, but moon orbits are compressed onto even rungs for legibility — not to true distance. Press "g" to switch views.';
+const GROUND_CAPTION = `relief is exaggerated ${RELIEF_EXAGGERATION}× over true scale so mountains and trenches read on a rendered sphere at all — not to true height. Press "g" to switch views.`;
+
+function mountViews(system: SystemScene, tiles: TilesScene): void {
   const canvas = document.createElement('canvas');
   canvas.className = 'orrery-canvas';
   app.append(canvas);
 
   const caption = document.createElement('div');
   caption.className = 'scale-caption';
-  caption.textContent =
-    'schematic scale: the world’s orbit is to true AU scale, but moon orbits are compressed onto even rungs for legibility — not to true distance.';
+  caption.textContent = SPACE_CAPTION;
   app.append(caption);
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x03050a);
-  scene.add(new THREE.AmbientLight(0x404050, 1.2));
+  // The system view: the schematic AU-scale orrery (Task 8).
+  const systemScene = new THREE.Scene();
+  systemScene.background = new THREE.Color(0x03050a);
+  systemScene.add(new THREE.AmbientLight(0x404050, 1.2));
+  const systemView = createSystemView(system);
+  systemScene.add(systemView.object3d);
+  const systemReach = Math.max(system.world.orbitAu, system.star.hzOuterAu) * 3 + 2;
+  const systemCamera = new THREE.PerspectiveCamera(
+    50,
+    window.innerWidth / window.innerHeight,
+    0.05,
+    systemReach * 20,
+  );
+  systemCamera.position.set(0, systemReach * 0.6, systemReach);
+  systemCamera.lookAt(0, 0, 0);
 
-  const view = createSystemView(system);
-  scene.add(view.object3d);
+  // The globe view: the planet itself (Task 9) — real relief, biome/ocean
+  // colors, settlement markers, an honest day/night terminator. No ambient
+  // light in this scene: the night side is meant to fall dark.
+  const globeScene = new THREE.Scene();
+  globeScene.background = new THREE.Color(0x000000);
+  const globeView = createGlobeView(tiles, system);
+  globeScene.add(globeView.object3d);
+  const globeReach = 6;
+  const globeCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, globeReach * 20);
+  globeCamera.position.set(0, globeReach * 0.4, globeReach);
+  globeCamera.lookAt(0, 0, 0);
 
-  const reach = Math.max(system.world.orbitAu, system.star.hzOuterAu) * 3 + 2;
-  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, reach * 20);
-  camera.position.set(0, reach * 0.6, reach);
-  camera.lookAt(0, 0, 0);
+  let showGlobe = false;
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'g') return;
+    showGlobe = !showGlobe;
+    caption.textContent = showGlobe ? GROUND_CAPTION : SPACE_CAPTION;
+  });
 
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    const aspect = window.innerWidth / window.innerHeight;
+    systemCamera.aspect = aspect;
+    systemCamera.updateProjectionMatrix();
+    globeCamera.aspect = aspect;
+    globeCamera.updateProjectionMatrix();
   });
 
   const hudRoot = document.createElement('div');
@@ -78,6 +109,12 @@ function mountSystemView(system: SystemScene): void {
   let playStartMs = performance.now();
   let dayAtPlayStart = 0;
   let day = 0;
+
+  function renderFrame(): void {
+    systemView.update(day);
+    globeView.update(day);
+    renderer.render(showGlobe ? globeScene : systemScene, showGlobe ? globeCamera : systemCamera);
+  }
 
   const cb: HudCallbacks = {
     onPlayPause() {
@@ -92,7 +129,7 @@ function mountSystemView(system: SystemScene): void {
       hud.setPaused(paused);
     },
     // Speed/true-scale/reroll/share/date-jump/view-toggle belong to the
-    // calendar clock and globe view (Tasks 9–10) — no-ops here.
+    // calendar clock and Task 10's URL-state wiring — no-ops here.
     onSpeed() {},
     onTrueScale() {},
     onReroll() {},
@@ -103,8 +140,7 @@ function mountSystemView(system: SystemScene): void {
       day = scrubbedDay;
       playStartMs = performance.now();
       dayAtPlayStart = day;
-      view.update(day);
-      renderer.render(scene, camera);
+      renderFrame();
     },
   };
   const hud = buildHud(hudRoot, String(system.seed), cb);
@@ -117,8 +153,7 @@ function mountSystemView(system: SystemScene): void {
       day = dayAtPlayStart + clockToDay(performance.now() - playStartMs, daysPerSecond);
       hud.setDay(day % system.world.yearDays);
     }
-    view.update(day);
-    renderer.render(scene, camera);
+    renderFrame();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

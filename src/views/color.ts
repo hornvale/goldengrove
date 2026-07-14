@@ -1,3 +1,18 @@
+/** Linear blend between two RGB triples at `t` ∈ [0,1] — used to derive a
+ * plausible color for a biome name with no direct counterpart in another
+ * palette's enum (see `biomePalette.ts`'s `biomeColorForName`). */
+export function lerpRgb(
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+  t: number,
+): [number, number, number] {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ];
+}
+
 /** Approximate blackbody chromaticity, good enough for star tinting
  * (Tanner Helland's fit, normalized to 0-1). Valid ~1000K-40000K. */
 export function temperatureToColor(kelvin: number): [number, number, number] {
