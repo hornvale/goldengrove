@@ -7,5 +7,4 @@ catalog; the system and the globe render in three.js.
 Lineage: the three.js views descend from bitterbridge/goldengrove; the
 ephemeris/scene modules from hornvale's retired in-book orrery client.
 Presentation here is deliberately non-deterministic (hornvale decision
-0022: the sim emits data, clients render). Public domain (Unlicense) —
-matching bitterbridge/goldengrove's LICENSE.
+0022: the sim emits data, clients render). MIT.
