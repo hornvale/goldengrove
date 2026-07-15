@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import './styles.css';
 import { buildHud, type HudCallbacks } from './ui/hud';
 import { clockToDay } from './time/clock';
+import { dayToRawDate, formatRawDate, rawDateToDay } from './time/calendar';
 import { createSystemView } from './views/system';
 import { createGlobeView, RELIEF_EXAGGERATION } from './views/globe';
 import { ZoomController, dollyLookAt, dollyPosition, type ZoomTarget } from './views/zoom';
@@ -270,15 +271,22 @@ function mountViews(system: SystemScene, tiles: TilesScene, state: AppState): vo
       dayAtPlayStart = day;
       hud.setActiveSpeed(clamped); // corrects the button if the click was over-cap
     },
-    // True-scale toggle, reroll, share-link copy, and the calendar
-    // date-jump aren't part of this task — no-ops, same as before Task 10.
+    // True-scale toggle, reroll, and share-link copy aren't part of this
+    // task — no-ops, same as before Task 10.
     onTrueScale() {},
     onReroll() {},
     onShare() {},
-    onDateJump() {},
+    onDateJump(year, dayOfYear) {
+      day = rawDateToDay(year, dayOfYear, system.world.yearDays);
+      playStartMs = performance.now();
+      dayAtPlayStart = day;
+      hud.setDay(day % system.world.yearDays);
+      renderFrame();
+      syncUrl(true);
+    },
     onToggleView: toggleView,
     onScrub(scrubbedDay) {
-      day = scrubbedDay;
+      day = Math.floor(day / system.world.yearDays) * system.world.yearDays + scrubbedDay;
       playStartMs = performance.now();
       dayAtPlayStart = day;
       renderFrame();
@@ -292,6 +300,7 @@ function mountViews(system: SystemScene, tiles: TilesScene, state: AppState): vo
   hud.setMaxSpeed(SPEED_POLICY[view].maxMult);
   hud.setActiveSpeed(speedMemory.restore(view));
   hud.setDay(day % system.world.yearDays);
+  hud.setDate(formatRawDate(dayToRawDate(day, system.world.yearDays)));
 
   // Reading the URL happens once at boot (above, via `boot()`'s initial
   // state) plus here on `hashchange` — a user editing the address bar by
@@ -324,6 +333,7 @@ function mountViews(system: SystemScene, tiles: TilesScene, state: AppState): vo
     if (!paused) {
       day = dayAtPlayStart + clockToDay(performance.now() - playStartMs, daysPerSecond);
       hud.setDay(day % system.world.yearDays);
+      hud.setDate(formatRawDate(dayToRawDate(day, system.world.yearDays)));
     }
     renderFrame();
     syncUrl();

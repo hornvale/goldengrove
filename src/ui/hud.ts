@@ -1,31 +1,3 @@
-// Minimal local echo of the sim's `DateTime`/`Calendar` shapes (mirrors
-// `sim/types.ts`'s `DateTime` and `Calendar` interfaces, not yet harvested —
-// Task 7's data layer brings the full type in; this can drop these locals
-// and import from there instead).
-/** A moment in a world's calendar. */
-export interface DateTime {
-  year: number;
-  day_of_year: number;
-  day_fraction: number;
-}
-
-/** A world's calendar shape — only the fields this module's signature needs. */
-export interface Calendar {
-  solar_day_s: number;
-  year_solar_days: number;
-  leap: { base_days: number; terms: unknown[] };
-  months: unknown[];
-}
-
-/** Local convention: a day is displayed as 24 "hours" of 60 "minutes"
- * regardless of its physical length — clock-faces travel between worlds. */
-export function formatDate(d: DateTime, _cal: Calendar): string {
-  const totalMinutes = Math.floor(d.day_fraction * 24 * 60);
-  const hh = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
-  const mm = String(totalMinutes % 60).padStart(2, '0');
-  return `Y${d.year + 1} · Day ${d.day_of_year + 1} · ${hh}:${mm}`;
-}
-
 export const SPEED_STEPS: Array<{ label: string; mult: number }> = [
   { label: '1×', mult: 1 },
   { label: '1 min/s', mult: 60 },
