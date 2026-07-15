@@ -59,6 +59,9 @@ describe('inspector content', () => {
     expect(starInfo(sys).title.includes(sys.star.className)).toBe(true);
     expect(worldInfo(sys, 0).lines.some((l) => l.includes(`${sys.world.yearDays.toFixed(1)}`))).toBe(true);
   });
+  it("the world card speaks hornvale's vocabulary: obliquity", () => {
+    expect(worldInfo(sys, 0).lines.some((l) => l.includes('obliquity'))).toBe(true);
+  });
   it('maps object names to targets, walking prefixes', () => {
     expect(namedTarget('star')).toEqual({ kind: 'star' });
     expect(namedTarget('moon-2')).toEqual({ kind: 'moon', index: 2 });

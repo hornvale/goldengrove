@@ -39,3 +39,4 @@ canvas { display: block; }
 .info-card .info-kind { margin: 0 0 6px; font-size: 0.7rem; letter-spacing: 0.06em;
   text-transform: uppercase; color: #6f7d99; }
 .info-card p { margin: 2px 0; }
+.info-card abbr { text-decoration: underline dotted #6f7d99; text-underline-offset: 2px; cursor: help; }
