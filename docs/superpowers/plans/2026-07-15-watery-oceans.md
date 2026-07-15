@@ -674,13 +674,15 @@ Replace the `update` stub with:
   }
 ```
 
-**Note:** the ocean geometry has no `uv` attribute yet — a normal map needs UVs. Add them in `buildOceanGeometry`: after the `colors` fill loop, derive equirect UVs from each vertex's lat/lon so the texture wraps the sphere seamlessly at integer repeats:
+**Note:** the ocean geometry has no `uv` attribute yet — a normal map needs UVs. Add them in `buildOceanGeometry`: after the `colors` fill loop, derive UVs from each vertex's own position in the face grid (row/col), not from lat/lon. (An equirect lat/lon mapping was tried first and rejected in review: atan2's branch cut tears a full-range UV jump across the ±180° antimeridian on face 1, and warps globally on the polar faces 4/5.) The per-face grid is simply the vertex's row/col normalized by `TILE_QUADS`:
 
 ```ts
   const uvs = new Float32Array(n * n * 2);
   for (let i = 0; i < n * n; i++) {
-    uvs[2 * i] = (grid.lons[i]! + 180) / 360;
-    uvs[2 * i + 1] = (grid.lats[i]! + 90) / 180;
+    const row = Math.floor(i / n);
+    const col = i % n;
+    uvs[2 * i] = col / TILE_QUADS;
+    uvs[2 * i + 1] = row / TILE_QUADS;
   }
 ```
 

@@ -11,6 +11,7 @@ import {
   waveOffset,
 } from './ocean';
 import { REFERENCE_RADIUS_M } from './worldMesh';
+import { TILE_QUADS } from './cubeSphere';
 import type { TilesScene } from '../sim/scene';
 
 /** 4×2 world, west half ocean (100 m deep), east half land 500 m above sea.
@@ -85,6 +86,21 @@ describe('buildOceanGeometry', () => {
     const tiles = oceanTiles();
     tiles.ocean = tiles.ocean.map(() => false);
     expect(buildOceanGeometry(tiles, 0, 2, 60)).toBeNull();
+  });
+  it('wave UVs are the per-face grid — continuous, no antimeridian tear', () => {
+    // Face 1 (the -X face) is where the old equirect mapping tore at ±180°.
+    const geom = buildOceanGeometry(oceanTiles(), 1, 2, 60)!;
+    const uv = geom.getAttribute('uv');
+    const n = TILE_QUADS + 1;
+    expect(uv.itemSize).toBe(2);
+    for (let row = 0; row < n; row++) {
+      for (let col = 0; col < n - 1; col++) {
+        const a = row * n + col;
+        // Horizontally adjacent vertices step by exactly 1/TILE_QUADS —
+        // a branch-cut jump would be ~1.0.
+        expect(Math.abs(uv.getX(a + 1) - uv.getX(a))).toBeCloseTo(1 / TILE_QUADS, 10);
+      }
+    }
   });
 });
 

@@ -83,12 +83,19 @@ export function buildOceanGeometry(
     if (ocean) hasOcean = true;
   }
   if (!hasOcean) return null;
-  // Equirect UVs from each vertex's lat/lon: the wave normal map wraps the
-  // sphere seamlessly at integer repeats.
+  // Per-face grid UVs (not equirect lat/lon): each face's own row/col
+  // parameterization, continuous across the whole face. Equirect UVs were
+  // tried first and rejected in review — atan2's branch cut tears a
+  // full-range UV jump across the ±180° antimeridian on face 1, and warps
+  // globally on the polar faces 4/5. The tradeoff here is that the wave
+  // pattern doesn't line up exactly across cube-face edges, but at this
+  // normalScale (0.15) that mismatch is imperceptible.
   const uvs = new Float32Array(n * n * 2);
   for (let i = 0; i < n * n; i++) {
-    uvs[2 * i] = (grid.lons[i]! + 180) / 360;
-    uvs[2 * i + 1] = (grid.lats[i]! + 90) / 180;
+    const row = Math.floor(i / n);
+    const col = i % n;
+    uvs[2 * i] = col / TILE_QUADS;
+    uvs[2 * i + 1] = row / TILE_QUADS;
   }
   const indices: number[] = [];
   for (let row = 0; row < TILE_QUADS; row++) {
