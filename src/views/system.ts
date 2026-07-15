@@ -12,10 +12,11 @@
  * expected to caption this (ORRERY-scale-honesty's lesson: admit the lie).
  */
 import * as THREE from 'three';
-import type { SystemScene } from '../sim/scene';
-import { worldPhase } from '../sim/ephemeris';
+import type { SystemScene, TilesScene } from '../sim/scene';
+import { rotationPhase, worldPhase } from '../sim/ephemeris';
 import { starTint } from '../sim/palette';
 import { fnv1a32, mulberry32 } from '../util/prng';
+import { buildFaceGeometry } from './worldMesh';
 
 const TAU = Math.PI * 2;
 
@@ -111,7 +112,7 @@ function buildOrbitLine(radiusUnits: number): THREE.LineLoop {
  * class, an HZ annulus, the world's orbit line, the world sphere, and its
  * moons — all positioned by `update(day)` from the golden-pinned
  * ephemeris. */
-export function createSystemView(sys: SystemScene): SystemView {
+export function createSystemView(sys: SystemScene, tiles: TilesScene): SystemView {
   const root = new THREE.Object3D();
   root.name = 'system-root';
 
@@ -140,12 +141,16 @@ export function createSystemView(sys: SystemScene): SystemView {
 
   const worldGroup = new THREE.Object3D();
   worldGroup.name = 'world';
-  worldGroup.add(
-    new THREE.Mesh(
-      new THREE.SphereGeometry(WORLD_RADIUS, 24, 16),
-      new THREE.MeshStandardMaterial({ color: 0x3a6ea5, roughness: 0.85, metalness: 0.05 }),
-    ),
-  );
+  // The same face at every altitude: the real cube-sphere mesh, smooth at
+  // this radius (reliefScale 0), spun by the same rotationPhase the globe
+  // uses — not a second blue marble.
+  const worldSpin = new THREE.Object3D();
+  worldSpin.name = 'world-spin';
+  const worldMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.05 });
+  for (let face = 0; face < 6; face++) {
+    worldSpin.add(new THREE.Mesh(buildFaceGeometry(tiles, face, WORLD_RADIUS, 0), worldMaterial));
+  }
+  worldGroup.add(worldSpin);
   root.add(worldGroup);
 
   const moonMeshes: THREE.Mesh[] = sys.moons.map((m, i) => {
@@ -169,6 +174,7 @@ export function createSystemView(sys: SystemScene): SystemView {
 
   function update(day: number): void {
     worldGroup.position.copy(worldPosition(day));
+    worldSpin.rotation.z = rotationPhase(sys, day) * TAU;
     for (let i = 0; i < moonMeshes.length; i++) {
       moonMeshes[i]!.position.copy(moonLocalPosition(sys, i, day));
     }

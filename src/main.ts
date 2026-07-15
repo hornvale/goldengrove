@@ -133,7 +133,7 @@ function mountViews(system: SystemScene, tiles: TilesScene, state: AppState): vo
   const systemScene = new THREE.Scene();
   systemScene.background = new THREE.Color(0x03050a);
   systemScene.add(new THREE.AmbientLight(0x404050, 1.2));
-  const systemView = createSystemView(system);
+  const systemView = createSystemView(system, tiles);
   systemScene.add(systemView.object3d);
   const systemReach = Math.max(system.world.orbitAu, system.star.hzOuterAu) * 3 + 2;
   const systemFraming = new THREE.Vector3(0, systemReach * 0.6, systemReach);

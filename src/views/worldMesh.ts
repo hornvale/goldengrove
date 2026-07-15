@@ -1,0 +1,95 @@
+/** The shared face-mesh builder: turns `scene/tiles/v1` into a colored,
+ * optionally-displaced cube-sphere face — the geometry both `./globe.ts`
+ * (real relief, schematic globe radius) and `./system.ts` (smooth, AU-scale
+ * world sphere) build their faces from. One mismatch here shows up as two
+ * views disagreeing about the same world.
+ */
+import * as THREE from 'three';
+import type { TilesScene } from '../sim/scene';
+import { elevationColor } from '../sim/palette';
+import { biomeColorForName } from './biomePalette';
+import { TILE_QUADS, tileGrid } from './cubeSphere';
+
+/** Reference body radius (Earth's, meters) used only to turn raw elevation
+ * meters into a *fraction* of a rendered radius before exaggerating — not a
+ * claim that the rendered world has this radius. */
+export const REFERENCE_RADIUS_M = 6.371e6;
+
+/** The tile-grid array fields `sampleTile` can index into — every
+ * `TilesScene` field that is a flat, row-major per-tile layer. */
+type TileArrayKey = {
+  [K in keyof TilesScene]: TilesScene[K] extends readonly unknown[] ? K : never;
+}[keyof TilesScene];
+
+/** Sample a per-tile layer at `(lat, lon)` through the row-major equirect
+ * lattice `scene/tiles/v1` defines: row 0 is lat +90..0 downward, col 0 is
+ * lon −180, values are pixel centers (`windows/scene/src/lib.rs:68-71`,
+ * binding convention — fix a mismatch here, never there). Longitude wraps
+ * at the ±180 seam; latitude clamps at the poles. */
+export function sampleTile<K extends TileArrayKey>(
+  tiles: TilesScene,
+  lat: number,
+  lon: number,
+  field: K,
+): TilesScene[K] extends readonly (infer E)[] ? E : never {
+  const rowSpan = 180 / tiles.height;
+  const colSpan = 360 / tiles.width;
+  const row = Math.min(tiles.height - 1, Math.max(0, Math.floor((90 - lat) / rowSpan)));
+  const rawCol = Math.floor((lon + 180) / colSpan);
+  const col = ((rawCol % tiles.width) + tiles.width) % tiles.width;
+  const layer = tiles[field] as unknown as ArrayLike<unknown>;
+  return layer[row * tiles.width + col] as never;
+}
+
+/** Build one cube face's displaced, vertex-colored geometry (level-0 tile —
+ * the whole face at TILE_QUADS×TILE_QUADS resolution; Task 10's zoom is
+ * where adaptive depth joins). `radius` is the rendered sphere's undisplaced
+ * radius (world units); `reliefScale` is the exaggeration multiple applied
+ * to elevation before it displaces the surface — 0 gives a smooth sphere. */
+export function buildFaceGeometry(
+  tiles: TilesScene,
+  face: number,
+  radius: number,
+  reliefScale: number,
+): THREE.BufferGeometry {
+  const grid = tileGrid({ face, level: 0, ix: 0, iy: 0 });
+  const n = TILE_QUADS + 1;
+  const positions = new Float32Array(n * n * 3);
+  const colors = new Float32Array(n * n * 3);
+  for (let i = 0; i < n * n; i++) {
+    const lat = grid.lats[i]!;
+    const lon = grid.lons[i]!;
+    const elevation = sampleTile(tiles, lat, lon, 'elevation_m');
+    const radiusAt = radius * (1 + (reliefScale * elevation) / REFERENCE_RADIUS_M);
+    positions[3 * i] = grid.units[3 * i]! * radiusAt;
+    positions[3 * i + 1] = grid.units[3 * i + 1]! * radiusAt;
+    positions[3 * i + 2] = grid.units[3 * i + 2]! * radiusAt;
+
+    const ocean = sampleTile(tiles, lat, lon, 'ocean');
+    const rgb = ocean
+      ? elevationColor(elevation, tiles.sea_level_m)
+      : biomeColorForName(tiles.biomeLegend[sampleTile(tiles, lat, lon, 'biome')] ?? '');
+    colors[3 * i] = rgb[0] / 255;
+    colors[3 * i + 1] = rgb[1] / 255;
+    colors[3 * i + 2] = rgb[2] / 255;
+  }
+  const indices: number[] = [];
+  for (let row = 0; row < TILE_QUADS; row++) {
+    for (let col = 0; col < TILE_QUADS; col++) {
+      const i00 = row * n + col;
+      const i10 = row * n + col + 1;
+      const i01 = (row + 1) * n + col;
+      const i11 = (row + 1) * n + col + 1;
+      // CCW in the face's (a, b) plane, whose u×v = n by construction
+      // (verified for all six faces) — this winding is outward-facing on
+      // every face without a per-face special case.
+      indices.push(i00, i10, i11, i00, i11, i01);
+    }
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geom.setIndex(indices);
+  geom.computeVertexNormals();
+  return geom;
+}
