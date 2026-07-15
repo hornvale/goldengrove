@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import type { SystemScene, TilesScene } from '../sim/scene';
 import { rotationPhase, worldPhase } from '../sim/ephemeris';
-import { buildFaceGeometry } from './worldMesh';
+import { buildFaceGeometry, stitchNormals } from './worldMesh';
 
 const TAU = Math.PI * 2;
 
@@ -141,12 +141,16 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
     faceMeshes.push(mesh);
   }
   const schematicGeoms = faceMeshes.map((m) => m.geometry);
+  // Each face computes its normals alone; reconcile them across cube edges
+  // or directional light draws every edge as a seam (worst at 60× relief).
+  stitchNormals(schematicGeoms);
   // True-relief geometry (1x, honest) is expensive to build and most
   // sessions never ask for it — construct lazily on first toggle, not here.
   let trueGeoms: THREE.BufferGeometry[] | null = null;
   function setTrueRelief(on: boolean): void {
     if (on && trueGeoms === null) {
       trueGeoms = Array.from({ length: 6 }, (_, f) => buildFaceGeometry(tiles, f, GLOBE_RADIUS, 1));
+      stitchNormals(trueGeoms);
     }
     faceMeshes.forEach((m, f) => { m.geometry = (on ? trueGeoms! : schematicGeoms)[f]!; });
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REFERENCE_RADIUS_M, buildFaceGeometry } from './worldMesh';
+import { REFERENCE_RADIUS_M, buildFaceGeometry, stitchNormals } from './worldMesh';
 import type { TilesScene } from '../sim/scene';
 
 /** 4×2 all-land world, one uniform biome, 1000 m everywhere. */
@@ -8,6 +8,18 @@ function flatTiles(): TilesScene {
   return {
     schema: 'scene/tiles/v1', width: 4, height: 2, sea_level_m: 0,
     elevation_m: Array(n).fill(1000), ocean: Array(n).fill(false),
+    biome: Array(n).fill(0), biomeLegend: ['steppe'], features: [],
+  };
+}
+
+/** 16×8 all-land world with strong deterministic relief — enough slope
+ * variation that per-face vertex normals disagree along cube edges. */
+function bumpyTiles(): TilesScene {
+  const width = 16, height = 8, n = width * height;
+  const elevation_m = Array.from({ length: n }, (_, i) => 4000 * Math.sin(i * 2.39996));
+  return {
+    schema: 'scene/tiles/v1', width, height, sea_level_m: 0,
+    elevation_m, ocean: Array(n).fill(false),
     biome: Array(n).fill(0), biomeLegend: ['steppe'], features: [],
   };
 }
@@ -34,5 +46,44 @@ describe('buildFaceGeometry', () => {
     const expected = 2 * (1 + (60 * 1000) / REFERENCE_RADIUS_M);
     const r = Math.hypot(pos.getX(0), pos.getY(0), pos.getZ(0));
     expect(r).toBeCloseTo(expected, 6);
+  });
+});
+
+describe('stitchNormals', () => {
+  /** Map of position key → normals seen there, across all `geoms`. */
+  function normalsByPosition(geoms: ReturnType<typeof buildFaceGeometry>[]): Map<string, number[][]> {
+    const seen = new Map<string, number[][]>();
+    for (const g of geoms) {
+      const pos = g.getAttribute('position');
+      const nrm = g.getAttribute('normal');
+      for (let i = 0; i < pos.count; i++) {
+        const key = `${pos.getX(i)},${pos.getY(i)},${pos.getZ(i)}`;
+        const list = seen.get(key) ?? [];
+        list.push([nrm.getX(i), nrm.getY(i), nrm.getZ(i)]);
+        seen.set(key, list);
+      }
+    }
+    return seen;
+  }
+
+  it('makes normals agree at every vertex shared across faces', () => {
+    const geoms = Array.from({ length: 6 }, (_, f) => buildFaceGeometry(bumpyTiles(), f, 2, 60));
+    // Sanity: before stitching, at least one shared edge vertex disagrees —
+    // otherwise this test can't fail for the seam bug it guards against.
+    const before = [...normalsByPosition(geoms).values()].filter((l) => l.length > 1);
+    expect(before.length).toBeGreaterThan(0);
+    expect(
+      before.some((l) => l.some((n) => Math.hypot(n[0]! - l[0]![0]!, n[1]! - l[0]![1]!, n[2]! - l[0]![2]!) > 1e-3)),
+    ).toBe(true);
+
+    stitchNormals(geoms);
+    for (const list of normalsByPosition(geoms).values()) {
+      for (const n of list) {
+        expect(Math.hypot(n[0]!, n[1]!, n[2]!)).toBeCloseTo(1, 5);
+        expect(n[0]).toBe(list[0]![0]);
+        expect(n[1]).toBe(list[0]![1]);
+        expect(n[2]).toBe(list[0]![2]);
+      }
+    }
   });
 });

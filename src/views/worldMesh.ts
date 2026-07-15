@@ -93,3 +93,45 @@ export function buildFaceGeometry(
   geom.computeVertexNormals();
   return geom;
 }
+
+/** Average vertex normals across geometries wherever positions coincide.
+ *
+ * Each face's `computeVertexNormals` only sees its own triangles, so a
+ * vertex on a cube edge gets a one-sided normal — and the face on the other
+ * side gets a *different* one-sided normal for the bit-identical position
+ * (`cubeSphere.ts` guarantees shared edges/corners can't crack). Under
+ * exaggerated relief the two averages diverge hard, and directional light
+ * paints every cube edge as a seam. Summing and renormalizing across all
+ * coincident vertices gives both sides the same normal, which is what
+ * removes the seam; keying on the exact float32 position triple is safe
+ * because shared edge vertices are computed bit-identically per face. */
+export function stitchNormals(geoms: THREE.BufferGeometry[]): void {
+  const sums = new Map<string, [number, number, number]>();
+  const keyAt = (pos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, i: number) =>
+    `${pos.getX(i)},${pos.getY(i)},${pos.getZ(i)}`;
+  for (const g of geoms) {
+    const pos = g.getAttribute('position');
+    const nrm = g.getAttribute('normal');
+    for (let i = 0; i < pos.count; i++) {
+      const key = keyAt(pos, i);
+      const s = sums.get(key);
+      if (s) {
+        s[0] += nrm.getX(i);
+        s[1] += nrm.getY(i);
+        s[2] += nrm.getZ(i);
+      } else {
+        sums.set(key, [nrm.getX(i), nrm.getY(i), nrm.getZ(i)]);
+      }
+    }
+  }
+  for (const g of geoms) {
+    const pos = g.getAttribute('position');
+    const nrm = g.getAttribute('normal') as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const [x, y, z] = sums.get(keyAt(pos, i))!;
+      const len = Math.hypot(x, y, z) || 1;
+      nrm.setXYZ(i, x / len, y / len, z / len);
+    }
+    nrm.needsUpdate = true;
+  }
+}
