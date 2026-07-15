@@ -1,6 +1,8 @@
 import { expect, test } from 'vitest';
-import { orbitAngle, moonLocalPosition } from './system';
-import type { SystemScene } from '../sim/scene';
+import * as THREE from 'three';
+import { createSystemView, orbitAngle, moonLocalPosition } from './system';
+import { rotationPhase } from '../sim/ephemeris';
+import type { SystemScene, TilesScene } from '../sim/scene';
 
 // Names adapted to the parsed (camelCase) SystemScene shape — the brief's
 // sketch uses raw scene/system/v1 snake_case, but parseSystem in ./scene.ts
@@ -32,6 +34,70 @@ test('a moon is a quarter of the way around after a quarter sidereal period', ()
   // 7.5/30 = 0.25 turn: (x, z) rotates from (r, 0) to (0, r).
   expect(quarter.x).toBeCloseTo(0, 8);
   expect(quarter.z).toBeCloseTo(r, 8);
+});
+
+/** 4×2 all-land tiles — createSystemView only needs a valid lattice. */
+function tinyTiles(): TilesScene {
+  const n = 8;
+  return {
+    schema: 'scene/tiles/v1', width: 4, height: 2, sea_level_m: 0,
+    elevation_m: Array(n).fill(0), ocean: Array(n).fill(false),
+    biome: Array(n).fill(0), biomeLegend: ['steppe'], features: [],
+  };
+}
+
+/** World-frame direction of the mesh's (lat 0, lon L) surface point. */
+function meshLonDirection(view: ReturnType<typeof createSystemView>, lonRad: number): THREE.Vector3 {
+  view.object3d.updateMatrixWorld(true);
+  const spin = view.object3d.getObjectByName('world-spin')!;
+  const local = new THREE.Vector3(Math.cos(lonRad), Math.sin(lonRad), 0);
+  return local.transformDirection(spin.matrixWorld).normalize();
+}
+
+/** Direction from the world toward the star (at the origin) at `day`. */
+function toStar(view: ReturnType<typeof createSystemView>, day: number): THREE.Vector3 {
+  return view.worldPosition(day).negate().normalize();
+}
+
+test('a tidally locked world keeps longitude 0 facing the star all year', () => {
+  const locked: SystemScene = {
+    ...sys,
+    world: { orbitAu: 1, yearDays: 360, dayLengthDays: null, obliquityDeg: 0, yearPhaseOffset: 0.25 },
+  };
+  const view = createSystemView(locked, tinyTiles());
+  for (const day of [0, 90, 137.5, 270]) {
+    view.update(day);
+    expect(meshLonDirection(view, 0).dot(toStar(view, day))).toBeCloseTo(1, 6);
+  }
+});
+
+test("a spinning world's subsolar longitude matches the globe view's golden sweep", () => {
+  const spinning: SystemScene = {
+    ...sys,
+    world: { orbitAu: 1, yearDays: 360, dayLengthDays: 1, obliquityDeg: 0, yearPhaseOffset: 0.25 },
+  };
+  const view = createSystemView(spinning, tinyTiles());
+  for (const day of [0, 0.3, 42.75, 200.5]) {
+    view.update(day);
+    // The globe view pins the light at azimuth 0 and spins the ground by
+    // rotationPhase, so the subsolar longitude is -rotationPhase·TAU.
+    const subsolarLon = -rotationPhase(spinning, day) * 2 * Math.PI;
+    expect(meshLonDirection(view, subsolarLon).dot(toStar(view, day))).toBeCloseTo(1, 6);
+  }
+});
+
+test('the pole stands out of the orbit plane, leaning by the obliquity, without precessing', () => {
+  const view = createSystemView(sys, tinyTiles()); // obliquityDeg 20
+  const poleAt = (day: number) => {
+    view.update(day);
+    view.object3d.updateMatrixWorld(true);
+    const spin = view.object3d.getObjectByName('world-spin')!;
+    return new THREE.Vector3(0, 0, 1).transformDirection(spin.matrixWorld).normalize();
+  };
+  const pole = poleAt(0);
+  expect(pole.y).toBeCloseTo(Math.cos((20 * Math.PI) / 180), 6);
+  const later = poleAt(123.4);
+  expect(later.distanceTo(pole)).toBeLessThan(1e-6);
 });
 
 test('two moons at the same day sit on different rungs of the radial ladder', () => {

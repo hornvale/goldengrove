@@ -37,6 +37,20 @@ export function orbitAngle(sys: SystemScene, day: number): number {
   return worldPhase(sys, day) * TAU;
 }
 
+/** The world mesh's spin angle (radians about its own polar axis) at `day`.
+ *
+ * Not `rotationPhase` alone: this view's star is a real object in the
+ * inertial frame, so the mesh's spin must compose the orbit angle with the
+ * golden solar-day sweep for the *subsolar longitude* to match what the
+ * globe view renders (`subsolarPoint`'s `-rotationPhase * 360`). The
+ * payoff for a tidally locked world (rotationPhase 0): it rotates exactly
+ * once per orbit, keeping longitude 0 starward forever — instead of a
+ * frozen inertial orientation that shows the star sweeping the whole
+ * surface once a year, a day the document says it doesn't have. */
+export function worldSpinAngle(sys: SystemScene, day: number): number {
+  return rotationPhase(sys, day) * TAU - orbitAngle(sys, day) - Math.PI;
+}
+
 /** Moon `i`'s own orbital-position phase in [0,1): a full turn every
  * `siderealDays`. Distinct from `moonPhase` (the sun-relative illumination
  * phase used to shade a disc, golden-pinned in ./ephemeris) — a moon's
@@ -149,15 +163,24 @@ export function createSystemView(sys: SystemScene, tiles: TilesScene): SystemVie
   const worldGroup = new THREE.Object3D();
   worldGroup.name = 'world';
   // The same face at every altitude: the real cube-sphere mesh, smooth at
-  // this radius (reliefScale 0), spun by the same rotationPhase the globe
-  // uses — not a second blue marble.
+  // this radius (reliefScale 0), spun by worldSpinAngle so its subsolar
+  // longitude agrees with the globe view — not a second blue marble.
   const worldSpin = new THREE.Object3D();
   worldSpin.name = 'world-spin';
   const worldMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.05 });
   for (let face = 0; face < 6; face++) {
     worldSpin.add(new THREE.Mesh(buildFaceGeometry(tiles, face, WORLD_RADIUS, 0), worldMaterial));
   }
-  worldGroup.add(worldSpin);
+  // The mesh's polar axis is its local +z (cubeSphere's lat = asin(z));
+  // stand it out of the orbit plane, leaning by the document's obliquity —
+  // the same tilt the globe view encodes as its seasonal light swing, with
+  // the lean aimed so northern midsummer lands at worldPhase 0.25, where
+  // subsolarPoint's latitude peaks. The axis direction is fixed in the
+  // inertial frame (no precession); only worldSpin's own z turns per frame.
+  const worldAxis = new THREE.Object3D();
+  worldAxis.rotation.x = -Math.PI / 2 - (sys.world.obliquityDeg * Math.PI) / 180;
+  worldAxis.add(worldSpin);
+  worldGroup.add(worldAxis);
   root.add(worldGroup);
 
   const moonMeshes: THREE.Mesh[] = sys.moons.map((m, i) => {
@@ -183,7 +206,7 @@ export function createSystemView(sys: SystemScene, tiles: TilesScene): SystemVie
 
   function update(day: number): void {
     worldGroup.position.copy(worldPosition(day));
-    worldSpin.rotation.z = rotationPhase(sys, day) * TAU;
+    worldSpin.rotation.z = worldSpinAngle(sys, day);
     for (let i = 0; i < moonMeshes.length; i++) {
       moonMeshes[i]!.position.copy(moonLocalPosition(sys, i, day, trueScale));
     }
