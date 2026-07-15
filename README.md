@@ -21,10 +21,8 @@ npm test
 npm run build
 ```
 
-`wasm:local` currently builds from the campaign worktree
-(`hornvale/.claude/worktrees/goldengrove/clients/world-wasm`), since the
-sibling `../hornvale` checkout layout doesn't exist yet.
-# TODO(campaign-close): retarget to ../hornvale once the branch merges
+`wasm:local` copies from the sibling hornvale checkout (`../hornvale`);
+build the catalog there first with `make wasm-world`.
 
 Release consumption: CI and the live Pages deploy pin the catalog to
 hornvale release `world-wasm-v1` (`npm run wasm:release`).
