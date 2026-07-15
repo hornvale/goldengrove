@@ -8,6 +8,15 @@ import { parseSystem, parseTiles, SceneFormatError } from "./scene";
  * own schema check. */
 export type WorkerErrorKind = "catalog-fetch" | "genesis" | "schema" | "unknown";
 
+/** Join Vite's `BASE_URL` (e.g. `/goldengrove/` under GitHub Pages, `/` in
+ * local dev/preview) with `origin` to build the deployed catalog wasm's
+ * absolute URL — an unqualified `/hornvale_world.wasm` ignores the Pages
+ * sub-path and 404s. Tolerates a base missing its trailing slash. */
+export function catalogUrl(baseUrl: string, origin: string): string {
+  const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return new URL(`${base}hornvale_world.wasm`, origin).href;
+}
+
 function errorKind(err: unknown): WorkerErrorKind {
   if (err instanceof CatalogFetchError) return "catalog-fetch";
   if (err instanceof SceneFormatError) return "schema";
@@ -18,7 +27,7 @@ function errorKind(err: unknown): WorkerErrorKind {
 self.onmessage = async (ev: MessageEvent) => {
   const { seed, pins, tilesWidth } = ev.data;
   try {
-    const catalog = await loadCatalog(new URL("/hornvale_world.wasm", self.location.origin).href);
+    const catalog = await loadCatalog(catalogUrl(import.meta.env.BASE_URL, self.location.origin));
     catalog.generate(BigInt(seed), pins);
     const system = parseSystem(catalog.sceneSystem());
     const tiles = parseTiles(catalog.sceneTiles(tilesWidth));
