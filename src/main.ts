@@ -12,6 +12,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './styles.css';
 import { buildHud, type HudCallbacks } from './ui/hud';
+import { mountInfoCard } from './ui/infoCard';
+import { moonInfo, namedTarget, settlementInfo, starInfo, worldInfo } from './ui/inspect';
 import { clockToDay } from './time/clock';
 import { dayToRawDate, formatRawDate, rawDateToDay } from './time/calendar';
 import { createSystemView } from './views/system';
@@ -414,6 +416,43 @@ function mountViews(system: SystemScene, tiles: TilesScene, state: AppState): vo
   hud.setActiveSpeed(speedMemory.restore(view));
   hud.setDay(day % system.world.yearDays);
   updateDateLine();
+
+  const infoCard = mountInfoCard(app);
+  const raycaster = new THREE.Raycaster();
+
+  /** A click (not an orbit-drag): pointerdown/up within 5 px and 500 ms. */
+  let downAt: { x: number; y: number; t: number } | null = null;
+  function onPointerDown(e: PointerEvent): void {
+    downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+  }
+  function pick(e: PointerEvent, camera: THREE.PerspectiveCamera, sceneRoot: THREE.Object3D): void {
+    if (!downAt) return;
+    const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+    const held = performance.now() - downAt.t;
+    downAt = null;
+    if (moved > 5 || held > 500) return; // that was an orbit, not a click
+    const ndc = new THREE.Vector2(
+      (e.clientX / window.innerWidth) * 2 - 1,
+      -(e.clientY / window.innerHeight) * 2 + 1,
+    );
+    raycaster.setFromCamera(ndc, camera);
+    for (const hit of raycaster.intersectObjects(sceneRoot.children, true)) {
+      for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
+        const target = namedTarget(o.name);
+        if (!target) continue;
+        if (target.kind === 'star') return infoCard.show(starInfo(system));
+        if (target.kind === 'world') return infoCard.show(worldInfo(system, day));
+        if (target.kind === 'moon') return infoCard.show(moonInfo(system, target.index, day));
+        const f = tiles.features.find((x) => x.name === target.name);
+        if (f) return infoCard.show(settlementInfo(tiles, f));
+      }
+    }
+    infoCard.hide(); // click-away on empty space
+  }
+  systemCanvas.addEventListener('pointerdown', onPointerDown);
+  globeCanvas.addEventListener('pointerdown', onPointerDown);
+  systemCanvas.addEventListener('pointerup', (e) => pick(e, systemCamera, systemScene));
+  globeCanvas.addEventListener('pointerup', (e) => pick(e, globeCamera, globeScene));
 
   // Reading the URL happens once at boot (above, via `boot()`'s initial
   // state) plus here on `hashchange` — a user editing the address bar by
