@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSystem, parseTiles, parseRegion, SceneFormatError } from './scene';
+import { parseSystem, parseTiles, parseRegion, parseMoons, SceneFormatError } from './scene';
 
 const DOC = JSON.stringify({
   schema: 'scene/system/v1',
@@ -261,5 +261,39 @@ describe('parseRegion', () => {
     const doc = validRegion();
     delete doc.circulation_bands;
     expect(parseRegion(JSON.stringify(doc)).circulationBands).toBeNull();
+  });
+});
+
+const MOONS_DOC = JSON.stringify({
+  schema: 'scene/moons/v1',
+  seed: 42,
+  moons: [
+    { index: 0, mass_rel: 1.2, radius_km: 1846.5, surface_gravity_ms2: 1.72,
+      albedo: 0.18, cratering: 0.3, maria_fraction: 0.5, tint: [0.7, 0.68, 0.72],
+      surface_class: 'maria-rich' },
+    { index: 1, mass_rel: 0.4, radius_km: 1279.0, surface_gravity_ms2: 1.19,
+      albedo: 0.22, cratering: 0.8, maria_fraction: 0.1, tint: [0.71, 0.7, 0.69],
+      surface_class: 'heavily-cratered' },
+  ],
+});
+
+describe('parseMoons', () => {
+  it('accepts a valid document and maps snake_case to camelCase', () => {
+    const m = parseMoons(MOONS_DOC);
+    expect(m.seed).toBe(42);
+    expect(m.moons).toHaveLength(2);
+    expect(m.moons[0]!.massRel).toBe(1.2);
+    expect(m.moons[0]!.surfaceClass).toBe('maria-rich');
+    expect(m.moons[1]!.tint).toEqual([0.71, 0.7, 0.69]);
+  });
+  it('rejects the wrong schema', () => {
+    expect(() => parseMoons(JSON.stringify({ schema: 'scene/system/v1' }))).toThrow(SceneFormatError);
+  });
+  it('rejects a non-array moons', () => {
+    expect(() => parseMoons(JSON.stringify({ schema: 'scene/moons/v1', seed: 1, moons: {} }))).toThrow('moons');
+  });
+  it('rejects a bad tint length', () => {
+    const doc = JSON.parse(MOONS_DOC); doc.moons[0].tint = [0.7, 0.7];
+    expect(() => parseMoons(JSON.stringify(doc))).toThrow('tint');
   });
 });

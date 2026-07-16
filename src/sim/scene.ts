@@ -121,12 +121,35 @@ export interface RegionScene {
   moisture: number[];
 }
 
+/** One moon's surface: derived physics + seeded descriptors, from
+ * `scene/moons/v1`. */
+export interface MoonSurface {
+  index: number;
+  massRel: number;
+  radiusKm: number;
+  surfaceGravityMs2: number;
+  albedo: number;
+  cratering: number;
+  mariaFraction: number;
+  tint: number[];
+  surfaceClass: string;
+}
+
+/** One `scene/moons/v1` document: per-moon surface descriptors. */
+export interface MoonsScene {
+  schema: string;
+  seed: number;
+  moons: MoonSurface[];
+}
+
 /** A scene document violated the contract; the message names how. */
 export class SceneFormatError extends Error {}
 
 const SYSTEM_SCHEMA = "scene/system/v1";
 const TILES_SCHEMA = "scene/tiles/v1";
 const REGION_SCHEMA = "scene/tiles-region/v1";
+/** The `scene/moons/v1` schema identifier. */
+export const MOONS_SCHEMA = "scene/moons/v1";
 
 function fail(message: string): never {
   throw new SceneFormatError(message);
@@ -213,6 +236,34 @@ export function parseSystem(text: string): SystemScene {
     world,
     moons: moons.map(parseMoon),
   };
+}
+
+function parseMoonSurface(doc: unknown): MoonSurface {
+  const m = doc as Record<string, unknown>;
+  if (typeof m !== "object" || m === null) fail("a moon must be an object");
+  return {
+    index: requireNumber(m, "index"),
+    massRel: requireNumber(m, "mass_rel"),
+    radiusKm: requireNumber(m, "radius_km"),
+    surfaceGravityMs2: requireNumber(m, "surface_gravity_ms2"),
+    albedo: requireNumber(m, "albedo"),
+    cratering: requireNumber(m, "cratering"),
+    mariaFraction: requireNumber(m, "maria_fraction"),
+    tint: numberArray(m, "tint", 3),
+    surfaceClass: requireString(m, "surface_class"),
+  };
+}
+
+/** Parse and validate a scene/moons/v1 document; throw SceneFormatError naming any violation. */
+export function parseMoons(text: string): MoonsScene {
+  const doc = parseDocument(text);
+  if (doc.schema !== MOONS_SCHEMA) {
+    fail(`schema must be ${MOONS_SCHEMA}, got ${String(doc.schema)}`);
+  }
+  const seed = requireNumber(doc, "seed");
+  const moons = doc.moons;
+  if (!Array.isArray(moons)) fail("moons must be an array");
+  return { schema: MOONS_SCHEMA, seed, moons: moons.map(parseMoonSurface) };
 }
 
 function numberArray(doc: Record<string, unknown>, key: string, length: number): number[] {
