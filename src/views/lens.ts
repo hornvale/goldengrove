@@ -11,6 +11,8 @@
 import type { TilesScene } from '../sim/scene';
 import { elevationColor } from '../sim/palette';
 import { biomeColorForName } from './biomePalette';
+import { HEX, sequential, diverging } from './colormap';
+import { temperatureAt } from '../sim/climate';
 
 /** 0-255 RGB, matching `elevationColor`'s existing return shape. */
 export type RGB = [number, number, number];
@@ -66,8 +68,85 @@ export const naturalLens: Lens = {
   },
 };
 
+/** Spec §7's validated ramps. Do not substitute or extend by eye — these were
+ * validated with the dataviz validator against the orrery's surface (#05070f). */
+const TEMP_COLD = HEX('#2a78d6');
+const TEMP_MID = HEX('#f0efec');
+const TEMP_HOT = HEX('#e34948');
+/** Temperature's clamp, °C. Beyond ±40 the poles saturate. */
+const TEMP_EXTENT = 40;
+const MOISTURE_RAMP: RGB[] = [HEX('#cde2fb'), HEX('#0d366b')];
+const UNREST_RAMP: RGB[] = [HEX('#d4f0e4'), HEX('#0a4a33')];
+
+/** Elevation everywhere through the hypsometric ramp — the atlas raster's own
+ * convention, applied to land and sea alike rather than only under the sea. */
+export const topographicLens: Lens = {
+  id: 'topographic',
+  label: 'topographic',
+  caption: 'elevation through the atlas hypsometric ramp, relative to sea level; colors are a cartographic convention, not the ground’s actual hue.',
+  dependsOnDay: false,
+  colorAt: (tiles, i) => elevationColor(tiles.elevation_m[i]!, tiles.sea_level_m),
+  legend: (tiles) => [
+    { swatch: elevationColor(tiles.sea_level_m - 6000, tiles.sea_level_m), label: 'abyss' },
+    { swatch: elevationColor(tiles.sea_level_m, tiles.sea_level_m), label: 'sea level' },
+    { swatch: elevationColor(tiles.sea_level_m + 2500, tiles.sea_level_m), label: '2.5 km' },
+    { swatch: elevationColor(tiles.sea_level_m + 5000, tiles.sea_level_m), label: '5 km +' },
+  ],
+};
+
+/** The one living lens: temperature advances with the sim clock through the
+ * producer-pinned seasonal evaluator. Diverges about 0 °C — freezing is the
+ * meaningful midpoint, and the one the ice overlay keys on. */
+export const temperatureLens: Lens = {
+  id: 'temperature',
+  label: 'temperature',
+  caption: `surface temperature on the shown day, diverging about freezing and clamped at ±${TEMP_EXTENT} °C; the seasonal curve is the producer’s own evaluator, not a client invention.`,
+  dependsOnDay: true,
+  colorAt: (tiles, i, day) =>
+    diverging(TEMP_COLD, TEMP_MID, TEMP_HOT, temperatureAt(tiles, i, day), TEMP_EXTENT),
+  legend: () => [
+    { swatch: TEMP_COLD, label: `≤ −${TEMP_EXTENT} °C` },
+    { swatch: TEMP_MID, label: '0 °C' },
+    { swatch: TEMP_HOT, label: `≥ +${TEMP_EXTENT} °C` },
+  ],
+};
+
+/** Moisture as the climate model's own dimensionless index — deliberately NOT
+ * rainfall: no mm/yr calibration exists and inventing one would be invented
+ * precision. */
+export const moistureLens: Lens = {
+  id: 'moisture',
+  label: 'moisture',
+  caption: 'the climate model’s dimensionless moisture index (0-1) — not rainfall: no mm/yr calibration exists, and inventing one would be invented precision.',
+  dependsOnDay: false,
+  colorAt: (tiles, i) => sequential(MOISTURE_RAMP, tiles.moisture[i]!),
+  legend: () => [
+    { swatch: MOISTURE_RAMP[0]!, label: '0 — dry' },
+    { swatch: MOISTURE_RAMP[1]!, label: '1 — wet' },
+  ],
+};
+
+/** Tectonic unrest, dimensionless in [0,1]. */
+export const unrestLens: Lens = {
+  id: 'unrest',
+  label: 'unrest',
+  caption: 'tectonic unrest, dimensionless (0-1) — highest along plate boundaries.',
+  dependsOnDay: false,
+  colorAt: (tiles, i) => sequential(UNREST_RAMP, tiles.unrest[i]!),
+  legend: () => [
+    { swatch: UNREST_RAMP[0]!, label: '0 — quiet' },
+    { swatch: UNREST_RAMP[1]!, label: '1 — violent' },
+  ],
+};
+
 /** The registry. `natural` is first — it is the default, not a base case. */
-export const LENSES: readonly Lens[] = [naturalLens];
+export const LENSES: readonly Lens[] = [
+  naturalLens,
+  topographicLens,
+  temperatureLens,
+  moistureLens,
+  unrestLens,
+];
 
 /** The lens for `id`, falling back to `natural` for anything unrecognized
  * (a stale URL, a removed lens). */
