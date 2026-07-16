@@ -63,6 +63,16 @@ export interface TilesScene {
   biomeLegend: string[];
   /** Named points: settlements, the flagship last. */
   features: Feature[];
+  /** Mean temperature per tile, degrees Celsius — row-major, matching `elevation_m`. */
+  t_mean_c: number[];
+  /** Seasonal temperature swing (peak-to-mean amplitude) per tile, degrees Celsius — row-major, matching `elevation_m`. */
+  t_swing_c: number[];
+  /** The length of one seasonal cycle, in standard days. */
+  season_period_days: number;
+  /** The world's count of atmospheric circulation bands; `null` when the world is tidally locked and has none. */
+  circulationBands: number | null;
+  /** Moisture per tile, a dimensionless ratio — row-major, matching `elevation_m`. */
+  moisture: number[];
 }
 
 /** A scene document violated the contract; the message names how. */
@@ -212,6 +222,21 @@ export function parseTiles(text: string): TilesScene {
   const tiles = width * height;
   const features = doc.features;
   if (!Array.isArray(features)) fail("features must be an array");
+  const seasonPeriodDays = requireNumber(doc, "season_period_days");
+  if (seasonPeriodDays <= 0) fail("season_period_days must be positive");
+  const circulationBandsRaw = doc.circulation_bands;
+  let circulationBands: number | null;
+  if (circulationBandsRaw === undefined || circulationBandsRaw === null) {
+    circulationBands = null;
+  } else if (
+    typeof circulationBandsRaw !== "number" ||
+    !Number.isInteger(circulationBandsRaw) ||
+    circulationBandsRaw < 1
+  ) {
+    fail("circulation_bands must be an integer >= 1, or absent");
+  } else {
+    circulationBands = circulationBandsRaw;
+  }
   return {
     schema: TILES_SCHEMA,
     width,
@@ -222,5 +247,10 @@ export function parseTiles(text: string): TilesScene {
     biome: numberArray(doc, "biome", tiles),
     biomeLegend: stringArray(doc, "biome_legend"),
     features: features.map(parseFeature),
+    t_mean_c: numberArray(doc, "t_mean_c", tiles),
+    t_swing_c: numberArray(doc, "t_swing_c", tiles),
+    season_period_days: seasonPeriodDays,
+    circulationBands,
+    moisture: numberArray(doc, "moisture", tiles),
   };
 }

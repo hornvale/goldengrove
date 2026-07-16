@@ -23,6 +23,8 @@ export function oceanTiles(): TilesScene {
     elevation_m: [-2600, -2600, -2000, -2000, -2600, -2600, -2000, -2000],
     ocean: [true, true, false, false, true, true, false, false],
     biome: [0, 0, 0, 0, 0, 0, 0, 0], biomeLegend: ['steppe'], features: [],
+    t_mean_c: Array(8).fill(15), t_swing_c: Array(8).fill(5),
+    season_period_days: 365, circulationBands: null, moisture: Array(8).fill(0.5),
   };
 }
 

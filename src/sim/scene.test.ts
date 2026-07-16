@@ -87,6 +87,11 @@ function validTiles(): Record<string, unknown> {
     biome: Array(tiles).fill(0),
     biome_legend: ['temperate-forest'],
     features: [{ name: 'Anchorhold', kind: 'flagship', latitude: 12.5, longitude: -3.25 }],
+    t_mean_c: Array(tiles).fill(15.0),
+    t_swing_c: Array(tiles).fill(5.0),
+    season_period_days: 365.25,
+    circulation_bands: 3,
+    moisture: Array(tiles).fill(0.5),
   };
 }
 
@@ -147,5 +152,32 @@ describe('parseTiles', () => {
     const doc = validTiles();
     doc.features = [{ name: 'Anchorhold', kind: 'flagship', latitude: 1 }];
     expect(() => parseTiles(JSON.stringify(doc))).toThrow('longitude');
+  });
+
+  it('reads the climate layers with correct lengths', () => {
+    const t = parseTiles(JSON.stringify(validTiles()));
+    expect(t.t_mean_c.length).toEqual(128);
+    expect(t.t_swing_c.length).toEqual(128);
+    expect(t.moisture.length).toEqual(128);
+    expect(t.season_period_days).toEqual(365.25);
+    expect(t.circulationBands).toEqual(3);
+  });
+
+  it('treats an absent circulation_bands as null (locked world)', () => {
+    const doc = validTiles();
+    delete doc.circulation_bands;
+    expect(parseTiles(JSON.stringify(doc)).circulationBands).toBeNull();
+  });
+
+  it('rejects a document missing a climate layer', () => {
+    const doc = validTiles();
+    delete doc.t_mean_c;
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('t_mean_c');
+  });
+
+  it('rejects a t_swing_c whose length disagrees with the lattice', () => {
+    const doc = validTiles();
+    (doc.t_swing_c as number[]).pop();
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('t_swing_c');
   });
 });

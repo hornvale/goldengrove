@@ -83,6 +83,8 @@ function markerTiles(features: TilesScene['features']): TilesScene {
     schema: 'scene/tiles/v1', width: 4, height: 2, sea_level_m: 0,
     elevation_m: Array(n).fill(1000), ocean: Array(n).fill(false),
     biome: Array(n).fill(0), biomeLegend: ['steppe'], features,
+    t_mean_c: Array(n).fill(15), t_swing_c: Array(n).fill(5),
+    season_period_days: 365, circulationBands: null, moisture: Array(n).fill(0.5),
   };
 }
 
