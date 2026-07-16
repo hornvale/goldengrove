@@ -169,8 +169,10 @@ export function createSystemView(sys: SystemScene, tiles: TilesScene): SystemVie
   const worldSpin = new THREE.Object3D();
   worldSpin.name = 'world-spin';
   const worldMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.05 });
-  // Task 6 replaces this constant with the selected lens; today the system
-  // view always renders `natural`, exactly as it did before this lens existed.
+  // Deliberately always `natural`, never the selected lens: this view renders
+  // at reliefScale 0 as an orbital diagram with no legend room, so a data
+  // lens here would be uncaptioned and unreadable. orrery#5/#6 own giving
+  // this view its own lens picker if that ever changes.
   const colorAt = (i: number) => naturalLens.colorAt(tiles, i, 0);
   for (let face = 0; face < 6; face++) {
     worldSpin.add(new THREE.Mesh(buildFaceGeometry(tiles, face, WORLD_RADIUS, 0, colorAt), worldMaterial));

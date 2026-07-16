@@ -26,7 +26,7 @@ export interface LegendEntry {
 
 /** A registered render mode. */
 export interface Lens {
-  /** Stable id — used by the HUD and the URL state. */
+  /** Stable id — used by the HUD picker. */
   id: string;
   /** HUD picker text. */
   label: string;
@@ -202,7 +202,7 @@ export const LENSES: readonly Lens[] = [
 ];
 
 /** The lens for `id`, falling back to `natural` for anything unrecognized
- * (a stale URL, a removed lens). */
+ * (an id that never matched a lens, or one whose lens was since removed). */
 export function lensById(id: string): Lens {
   return LENSES.find((l) => l.id === id) ?? naturalLens;
 }

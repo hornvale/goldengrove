@@ -12,6 +12,8 @@ import {
   tileIndexOfVertex,
 } from './globe';
 import { REFERENCE_RADIUS_M } from './worldMesh';
+import { TILE_QUADS } from './cubeSphere';
+import { iceFraction } from './ice';
 import type { SystemScene, TilesScene } from '../sim/scene';
 import { loadSeed42Tiles, loadSeed42System } from '../testHelpers/wasmFixture';
 import { moistureLens, naturalLens, temperatureLens } from './lens';
@@ -256,12 +258,26 @@ test('blends ice under natural and never under a data lens', async () => {
   const expected = moistureLens.colorAt(tiles, tileIndexOfVertex(tiles, 0, idx), 0);
   expect(data[0]).toBeCloseTo(expected[0] / 255, 5);
 
-  // Under natural, at least one vertex differs from the raw natural color —
-  // that difference IS the ice blend. (Seed 42 has polar ice.)
+  // Under natural, an icy vertex's painted color must differ from
+  // naturalLens's own raw color at that tile — that difference IS the ice
+  // blend. Find a genuinely icy vertex on face 0 (seed 42 has polar ice)
+  // rather than assuming vertex 0 is one, so the assertion is pinned to the
+  // blend itself and not incidentally satisfied by two lenses just painting
+  // different data.
   globe.setLens(naturalLens);
   globe.update(0);
   const natural = faceColors(globe);
-  expect(natural).not.toEqual(data);
+  const gridN = (TILE_QUADS + 1) * (TILE_QUADS + 1);
+  let icyVertex = -1;
+  for (let v = 0; v < gridN; v++) {
+    if (iceFraction(tiles, tileIndexOfVertex(tiles, 0, v), 0) > 0) {
+      icyVertex = v;
+      break;
+    }
+  }
+  expect(icyVertex).toBeGreaterThanOrEqual(0);
+  const rawColor = naturalLens.colorAt(tiles, tileIndexOfVertex(tiles, 0, icyVertex), 0);
+  expect(natural[3 * icyVertex]).not.toBeCloseTo(rawColor[0] / 255, 5);
 }, WASM_FIXTURE_TIMEOUT_MS);
 
 test('the globe carries an ocean layer that follows the relief toggle', () => {
