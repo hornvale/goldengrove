@@ -4,7 +4,7 @@
 /** The pinned world-wasm release this client is built against (spec §5);
  * named in fetch-failure errors so a stale deploy or wrong URL is
  * unambiguous, and matches the tag the README documents. */
-export const CATALOG_VERSION = "world-wasm-v3";
+export const CATALOG_VERSION = "world-wasm-v4";
 
 /** A genesis or scene call refused; `code` is the raw hw_* status. */
 export class CatalogError extends Error {
@@ -26,6 +26,7 @@ interface HwExports {
   hw_new(seed: bigint): number;
   hw_new_pinned(seed: bigint, len: number): number;
   hw_scene_system(): number;
+  hw_scene_moons(): number;
   hw_scene_tiles(width: number): number;
   hw_in_ptr(): number;
   hw_out_ptr(): number;
@@ -63,6 +64,8 @@ export interface Catalog {
   generate(seed: bigint, pins?: Record<string, string>): void;
   /** The `scene/system/v1` document as raw JSON text. */
   sceneSystem(): string;
+  /** The `scene/moons/v1` document as raw JSON text. */
+  sceneMoons(): string;
   /** The `scene/tiles/v1` document (at `width` columns) as raw JSON text. */
   sceneTiles(width: number): string;
 }
@@ -87,6 +90,10 @@ export async function loadCatalog(wasmUrl: string): Promise<Catalog> {
     },
     sceneSystem() {
       check(e.hw_scene_system());
+      return readOut(e);
+    },
+    sceneMoons() {
+      check(e.hw_scene_moons());
       return readOut(e);
     },
     sceneTiles(width) {

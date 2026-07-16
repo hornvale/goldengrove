@@ -6,7 +6,7 @@
  * (a non-test module) so other tests can import it without double-running
  * these tests. */
 import { expect, test } from "vitest";
-import { loadSeed42Tiles, loadSeed42System, loadSeed42Region } from "../testHelpers/wasmFixture";
+import { loadSeed42Tiles, loadSeed42System, loadSeed42Region, loadSeed42Moons } from "../testHelpers/wasmFixture";
 
 test("the vendored binary's tiles document parses strictly", async () => {
   const tiles = await loadSeed42Tiles(64);
@@ -28,6 +28,21 @@ test("the vendored binary carries the plate and unrest layers", async () => {
   expect(Math.max(...tiles.unrest)).toBeLessThanOrEqual(1);
   expect(Math.min(...tiles.unrest)).toBeGreaterThanOrEqual(0);
   expect(new Set(tiles.plate).size).toBe(16); // seed 42 breaks into 16 plates
+});
+
+test("the vendored binary's moons document parses strictly", async () => {
+  const moons = await loadSeed42Moons();
+  expect(moons.schema).toBe("scene/moons/v1");
+  expect(moons.moons).toHaveLength(2); // seed 42 has two moons
+  for (const m of moons.moons) {
+    expect(m.albedo).toBeGreaterThanOrEqual(0.04);
+    expect(m.albedo).toBeLessThanOrEqual(0.5);
+    expect(m.cratering).toBeGreaterThanOrEqual(0);
+    expect(m.cratering).toBeLessThanOrEqual(1);
+    expect(m.mariaFraction).toBeGreaterThanOrEqual(0);
+    expect(m.mariaFraction).toBeLessThanOrEqual(1);
+    expect(m.tint).toHaveLength(3);
+  }
 });
 
 test("the vendored binary's region document parses strictly", async () => {
