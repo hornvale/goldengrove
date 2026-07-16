@@ -28,10 +28,12 @@ const app = document.getElementById('app')!;
 
 const SPACE_CAPTION =
   'schematic scale: the world’s orbit is to true AU scale, but moon orbits are compressed onto even rungs for legibility — not to true distance.';
-const GROUND_CAPTION = `relief is exaggerated ${RELIEF_EXAGGERATION}× over true scale so mountains and trenches read on a rendered sphere at all — not to true height.`;
+const ICE_CAPTION =
+  'sea ice and snow are a client derivation from the temperature layers — the season’s freeze line, not simulated ice.';
+const GROUND_CAPTION = `relief is exaggerated ${RELIEF_EXAGGERATION}× over true scale so mountains and trenches read on a rendered sphere at all — not to true height. ${ICE_CAPTION}`;
 const TRUE_SPACE_CAPTION =
   'true scale: distances are true to the documents; body sizes use reference radii (Earth/Sol/Luna) — the documents carry no absolute radii. The bodies all but vanish against the orbit’s sweep; zoom in and find them.';
-const TRUE_GROUND_CAPTION = 'relief at true scale (1×): the mountains are down there — the sphere just doesn’t show them at this size. That’s the honest render.';
+const TRUE_GROUND_CAPTION = `relief at true scale (1×): the mountains are down there — the sphere just doesn’t show them at this size. That’s the honest render. ${ICE_CAPTION}`;
 
 /** The plain "still generating" state — replaced by either a mounted world
  * or one of `renderError`'s distinct failure screens. */

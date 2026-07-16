@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REFERENCE_RADIUS_M, buildFaceGeometry, stitchNormals } from './worldMesh';
+import { REFERENCE_RADIUS_M, buildFaceGeometry, sampleTile, stitchNormals, tileIndex } from './worldMesh';
 import type { TilesScene } from '../sim/scene';
 
 /** 4×2 all-land world, one uniform biome, 1000 m everywhere. */
@@ -27,6 +27,24 @@ function bumpyTiles(): TilesScene {
     season_period_days: 365, circulationBands: null, moisture: Array(n).fill(0.5),
   };
 }
+
+describe('tileIndex', () => {
+  it('returns a value in [0, width*height) and agrees with sampleTile', () => {
+    const tiles = flatTiles();
+    tiles.elevation_m = tiles.elevation_m.map((_, i) => i);
+    for (const [lat, lon] of [
+      [45, -180],
+      [-45, 90],
+      [0, 0],
+      [89, 179],
+    ] as const) {
+      const i = tileIndex(tiles, lat, lon);
+      expect(i).toBeGreaterThanOrEqual(0);
+      expect(i).toBeLessThan(tiles.width * tiles.height);
+      expect(sampleTile(tiles, lat, lon, 'elevation_m')).toBe(tiles.elevation_m[i]);
+    }
+  });
+});
 
 describe('buildFaceGeometry', () => {
   it('reliefScale 0 puts every vertex exactly on the sphere', () => {

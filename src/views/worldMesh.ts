@@ -21,24 +21,32 @@ type TileArrayKey = {
   [K in keyof TilesScene]: TilesScene[K] extends readonly unknown[] ? K : never;
 }[keyof TilesScene];
 
+/** Row-major index into any `scene/tiles/v1` per-tile layer at `(lat, lon)`:
+ * row 0 is lat +90..0 downward, col 0 is lon −180, values are pixel centers
+ * (`windows/scene/src/lib.rs:68-71`, binding convention — fix a mismatch
+ * here, never there). Longitude wraps at the ±180 seam; latitude clamps at
+ * the poles. Shared by `sampleTile` and any caller that needs the index
+ * itself (e.g. `./ice.ts` and `./globe.ts` precomputing per-vertex indices
+ * once instead of resampling per field). */
+export function tileIndex(tiles: TilesScene, lat: number, lon: number): number {
+  const rowSpan = 180 / tiles.height;
+  const colSpan = 360 / tiles.width;
+  const row = Math.min(tiles.height - 1, Math.max(0, Math.floor((90 - lat) / rowSpan)));
+  const rawCol = Math.floor((lon + 180) / colSpan);
+  const col = ((rawCol % tiles.width) + tiles.width) % tiles.width;
+  return row * tiles.width + col;
+}
+
 /** Sample a per-tile layer at `(lat, lon)` through the row-major equirect
- * lattice `scene/tiles/v1` defines: row 0 is lat +90..0 downward, col 0 is
- * lon −180, values are pixel centers (`windows/scene/src/lib.rs:68-71`,
- * binding convention — fix a mismatch here, never there). Longitude wraps
- * at the ±180 seam; latitude clamps at the poles. */
+ * lattice `scene/tiles/v1` defines — see `tileIndex` for the addressing. */
 export function sampleTile<K extends TileArrayKey>(
   tiles: TilesScene,
   lat: number,
   lon: number,
   field: K,
 ): TilesScene[K] extends readonly (infer E)[] ? E : never {
-  const rowSpan = 180 / tiles.height;
-  const colSpan = 360 / tiles.width;
-  const row = Math.min(tiles.height - 1, Math.max(0, Math.floor((90 - lat) / rowSpan)));
-  const rawCol = Math.floor((lon + 180) / colSpan);
-  const col = ((rawCol % tiles.width) + tiles.width) % tiles.width;
   const layer = tiles[field] as unknown as ArrayLike<unknown>;
-  return layer[row * tiles.width + col] as never;
+  return layer[tileIndex(tiles, lat, lon)] as never;
 }
 
 /** Build one cube face's displaced, vertex-colored geometry (level-0 tile —

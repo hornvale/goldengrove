@@ -10,8 +10,10 @@
 import * as THREE from 'three';
 import type { Feature, SystemScene, TilesScene } from '../sim/scene';
 import { rotationPhase, worldPhase } from '../sim/ephemeris';
-import { REFERENCE_RADIUS_M, buildFaceGeometry, sampleTile, stitchNormals } from './worldMesh';
+import { REFERENCE_RADIUS_M, buildFaceGeometry, sampleTile, stitchNormals, tileIndex } from './worldMesh';
+import { TILE_QUADS, tileGrid } from './cubeSphere';
 import { createOcean } from './ocean';
+import { iceFraction } from './ice';
 
 const TAU = Math.PI * 2;
 
@@ -33,6 +35,13 @@ export const MARKER_CLEARANCE = 0.006;
 /** Distance of the directional "sun" light from the globe center, in world
  * units — far enough to read as parallel light across the whole sphere. */
 const LIGHT_DISTANCE = GLOBE_RADIUS * 20;
+
+/** Ice-white blend target (0-1 RGB, matching the geometry `color` attribute's
+ * scale) — the near-white a frozen tile's biome/ocean color blends toward as
+ * `iceFraction` rises. Blended into the *base* vertex color before the
+ * directional light shades it, so night-side ice still goes dark (spec
+ * §4½'s honest terminator applies to ice the same as everything else). */
+const ICE_COLOR: readonly [number, number, number] = [0.92, 0.95, 0.98];
 
 // sampleTile now lives in `./worldMesh` (the shared face-mesh builder); it
 // is re-exported below for existing consumers/tests.
@@ -234,6 +243,52 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
   // Each face computes its normals alone; reconcile them across cube edges
   // or directional light draws every edge as a seam (worst at 60× relief).
   stitchNormals(schematicGeoms);
+
+  // Ice overlay precompute: `buildFaceGeometry` bakes each vertex's
+  // ocean/biome color once at build time, but ice must advance with the sim
+  // clock, so `update(day)` recolors every frame the day changes. Rather
+  // than re-derive lat/lon → tile per vertex per tick, snapshot each face's
+  // *unfrozen* base color once (colors are identical across schematic and
+  // true-relief geometry — only positions differ under relief) and its
+  // per-vertex tile index (same grid `buildFaceGeometry` used), and blend
+  // from that snapshot every recolor instead of accumulating drift.
+  const tileGridN = TILE_QUADS + 1;
+  const tileIdxByFace: Int32Array[] = [];
+  const baseColorByFace: Float32Array[] = [];
+  for (let face = 0; face < 6; face++) {
+    const grid = tileGrid({ face, level: 0, ix: 0, iy: 0 });
+    const idx = new Int32Array(tileGridN * tileGridN);
+    for (let i = 0; i < idx.length; i++) idx[i] = tileIndex(tiles, grid.lats[i]!, grid.lons[i]!);
+    tileIdxByFace.push(idx);
+    baseColorByFace.push(Float32Array.from(schematicGeoms[face]!.getAttribute('color').array as ArrayLike<number>));
+  }
+  // Recolors a geometry set's `color` attribute in place from the base-color
+  // snapshot, blended toward `ICE_COLOR` by that day's `iceFraction` — called
+  // on both schematic and true-relief geometry sets (whichever exist) so the
+  // relief toggle never shows stale ice.
+  function recolorIceInto(geoms: THREE.BufferGeometry[], day: number): void {
+    for (let face = 0; face < 6; face++) {
+      const color = geoms[face]!.getAttribute('color') as THREE.BufferAttribute;
+      const base = baseColorByFace[face]!;
+      const idx = tileIdxByFace[face]!;
+      for (let v = 0; v < idx.length; v++) {
+        const frac = iceFraction(tiles, idx[v]!, day);
+        const r = base[3 * v]!;
+        const g = base[3 * v + 1]!;
+        const b = base[3 * v + 2]!;
+        color.setXYZ(v, r + (ICE_COLOR[0] - r) * frac, g + (ICE_COLOR[1] - g) * frac, b + (ICE_COLOR[2] - b) * frac);
+      }
+      color.needsUpdate = true;
+    }
+  }
+  let lastIceDay: number | null = null;
+  function recolorIce(day: number): void {
+    if (day === lastIceDay) return;
+    lastIceDay = day;
+    recolorIceInto(schematicGeoms, day);
+    if (trueGeoms) recolorIceInto(trueGeoms, day);
+  }
+
   // The water layer: a smooth translucent sphere at sea level, over the
   // displaced seafloor — spinning with the ground so wave motion (stage 2)
   // stays fixed to the world, not the camera.
@@ -246,6 +301,10 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
     if (on && trueGeoms === null) {
       trueGeoms = Array.from({ length: 6 }, (_, f) => buildFaceGeometry(tiles, f, GLOBE_RADIUS, 1));
       stitchNormals(trueGeoms);
+      // Freshly built geometry starts unfrozen; force the next update() to
+      // paint it for the day already in effect (the day-unchanged guard in
+      // recolorIce would otherwise skip it).
+      lastIceDay = null;
     }
     faceMeshes.forEach((m, f) => { m.geometry = (on ? trueGeoms! : schematicGeoms)[f]!; });
     // The terrain the markers stand on just moved — reseat them on it.
@@ -282,6 +341,10 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
     light.position.copy(latLonToUnit(sub.lat, 0)).multiplyScalar(LIGHT_DISTANCE);
     spinGroup.rotation.z = rotationPhase(sys, day) * TAU;
     ocean.update(day);
+    // Ice is blended into the base vertex color (before the material's
+    // lighting), so it inherits the honest terminator for free — no ambient
+    // light means the recolored night side still shades to dark.
+    recolorIce(day);
     if (!camera) return;
     for (const m of markers) {
       upWorld.copy(m.up).applyAxisAngle(zAxis, spinGroup.rotation.z);
