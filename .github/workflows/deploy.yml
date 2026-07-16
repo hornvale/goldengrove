@@ -14,8 +14,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
-      - run: npm test
+      # Fetch the catalog binary BEFORE the tests: the contract tests
+      # (catalogFixture, climate equivalence) drive the real vendored
+      # public/hornvale_world.wasm, which is gitignored and absent until
+      # this step places it.
       - run: npm run wasm:release
+      - run: npm test
       - run: npm run smoke
       - run: npm run build -- --base=/orrery/
       - run: npx playwright install --with-deps chromium
