@@ -92,6 +92,8 @@ function validTiles(): Record<string, unknown> {
     season_period_days: 365.25,
     circulation_bands: 3,
     moisture: Array(tiles).fill(0.5),
+    plate: Array.from({ length: tiles }, (_, i) => i % 4),
+    unrest: Array.from({ length: tiles }, (_, i) => (i % 5) / 4),
   };
 }
 
@@ -179,5 +181,24 @@ describe('parseTiles', () => {
     const doc = validTiles();
     (doc.t_swing_c as number[]).pop();
     expect(() => parseTiles(JSON.stringify(doc))).toThrow('t_swing_c');
+  });
+
+  it('parses the plate and unrest layers', () => {
+    const doc = validTiles();
+    const t = parseTiles(JSON.stringify(doc));
+    expect(t.plate).toEqual(doc.plate);
+    expect(t.unrest).toEqual(doc.unrest);
+  });
+
+  it('rejects a plate layer of the wrong length', () => {
+    const doc = validTiles();
+    doc.plate = [0, 1]; // not width × height
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow(SceneFormatError);
+  });
+
+  it('rejects a missing unrest layer', () => {
+    const doc = validTiles();
+    delete doc.unrest;
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow(SceneFormatError);
   });
 });

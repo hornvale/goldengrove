@@ -61,6 +61,13 @@ export interface TilesScene {
   biome: number[];
   /** The full biome catalog, in stable order; `biome`'s indices key into this by position. */
   biomeLegend: string[];
+  /** Tectonic plate id per tile — an arbitrary per-world label, not a
+   * quantity: ids carry no ordering and no cross-world meaning. Row-major,
+   * matching `elevation_m`. */
+  plate: number[];
+  /** Tectonic unrest per tile, dimensionless in [0, 1] — row-major, matching
+   * `elevation_m`. */
+  unrest: number[];
   /** Named points: settlements, the flagship last. */
   features: Feature[];
   /** Mean temperature per tile, degrees Celsius — row-major, matching `elevation_m`. */
@@ -246,6 +253,8 @@ export function parseTiles(text: string): TilesScene {
     ocean: booleanArray(doc, "ocean", tiles),
     biome: numberArray(doc, "biome", tiles),
     biomeLegend: stringArray(doc, "biome_legend"),
+    plate: numberArray(doc, "plate", tiles),
+    unrest: numberArray(doc, "unrest", tiles),
     features: features.map(parseFeature),
     t_mean_c: numberArray(doc, "t_mean_c", tiles),
     t_swing_c: numberArray(doc, "t_swing_c", tiles),

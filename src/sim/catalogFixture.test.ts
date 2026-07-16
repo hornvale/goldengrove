@@ -20,3 +20,12 @@ test("the vendored binary's system document parses strictly", async () => {
   expect(sys.schema).toBe("scene/system/v1");
   expect(sys.moons.length).toBeGreaterThan(0);
 });
+
+test("the vendored binary carries the plate and unrest layers", async () => {
+  const tiles = await loadSeed42Tiles(64);
+  expect(tiles.plate).toHaveLength(tiles.width * tiles.height);
+  expect(tiles.unrest).toHaveLength(tiles.width * tiles.height);
+  expect(Math.max(...tiles.unrest)).toBeLessThanOrEqual(1);
+  expect(Math.min(...tiles.unrest)).toBeGreaterThanOrEqual(0);
+  expect(new Set(tiles.plate).size).toBe(16); // seed 42 breaks into 16 plates
+});
