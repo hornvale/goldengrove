@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { REFERENCE_RADIUS_M, buildFaceGeometry, sampleTile, stitchNormals, tileIndex } from './worldMesh';
+import { naturalLens } from './lens';
+import { elevationColor } from '../sim/palette';
+import { biomeColorForName } from './biomePalette';
+import { loadSeed42Tiles } from '../testHelpers/wasmFixture';
 import type { TilesScene } from '../sim/scene';
+
+/** A colorizer these geometry-shape tests don't care about — they assert
+ * positions and normals, not colors, so any deterministic RGB stands in. */
+const ignoreColor = (): [number, number, number] => [0, 0, 0];
 
 /** 4×2 all-land world, one uniform biome, 1000 m everywhere. */
 function flatTiles(): TilesScene {
@@ -50,7 +58,7 @@ describe('tileIndex', () => {
 
 describe('buildFaceGeometry', () => {
   it('reliefScale 0 puts every vertex exactly on the sphere', () => {
-    const geom = buildFaceGeometry(flatTiles(), 0, 2, 0);
+    const geom = buildFaceGeometry(flatTiles(), 0, 2, 0, ignoreColor);
     const pos = geom.getAttribute('position');
     for (let i = 0; i < pos.count; i++) {
       const r = Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i));
@@ -65,7 +73,7 @@ describe('buildFaceGeometry', () => {
     }
   });
   it('reliefScale displaces by scale * elevation / reference radius', () => {
-    const geom = buildFaceGeometry(flatTiles(), 0, 2, 60);
+    const geom = buildFaceGeometry(flatTiles(), 0, 2, 60, ignoreColor);
     const pos = geom.getAttribute('position');
     const expected = 2 * (1 + (60 * 1000) / REFERENCE_RADIUS_M);
     const r = Math.hypot(pos.getX(0), pos.getY(0), pos.getZ(0));
@@ -91,7 +99,7 @@ describe('stitchNormals', () => {
   }
 
   it('makes normals agree at every vertex shared across faces', () => {
-    const geoms = Array.from({ length: 6 }, (_, f) => buildFaceGeometry(bumpyTiles(), f, 2, 60));
+    const geoms = Array.from({ length: 6 }, (_, f) => buildFaceGeometry(bumpyTiles(), f, 2, 60, ignoreColor));
     // Sanity: before stitching, at least one shared edge vertex disagrees —
     // otherwise this test can't fail for the seam bug it guards against.
     const before = [...normalsByPosition(geoms).values()].filter((l) => l.length > 1);
@@ -108,6 +116,18 @@ describe('stitchNormals', () => {
         expect(n[1]).toBe(list[0]![1]);
         expect(n[2]).toBe(list[0]![2]);
       }
+    }
+  });
+});
+
+describe('the natural lens (behavior-preservation regression)', () => {
+  it('the natural lens reproduces the pre-refactor colors tile for tile', async () => {
+    const tiles = await loadSeed42Tiles(64);
+    for (let i = 0; i < tiles.width * tiles.height; i++) {
+      const expected = tiles.ocean[i]
+        ? elevationColor(tiles.elevation_m[i]!, tiles.sea_level_m)
+        : biomeColorForName(tiles.biomeLegend[tiles.biome[i]!] ?? '');
+      expect(naturalLens.colorAt(tiles, i, 0)).toEqual(expected);
     }
   });
 });

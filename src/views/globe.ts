@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import type { Feature, SystemScene, TilesScene } from '../sim/scene';
 import { rotationPhase, worldPhase } from '../sim/ephemeris';
 import { REFERENCE_RADIUS_M, buildFaceGeometry, sampleTile, stitchNormals, tileIndex } from './worldMesh';
+import { naturalLens } from './lens';
 import { TILE_QUADS, tileGrid } from './cubeSphere';
 import { createOcean } from './ocean';
 import { iceFraction } from './ice';
@@ -231,10 +232,17 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
   spinGroup.name = 'globe-spin';
   root.add(spinGroup);
 
+  // Task 6 replaces this constant with the selected lens; today the globe
+  // always renders `natural`, exactly as it did before this lens existed.
+  const colorAt = (i: number) => naturalLens.colorAt(tiles, i, 0);
+
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
   const faceMeshes: THREE.Mesh[] = [];
   for (let face = 0; face < 6; face++) {
-    const mesh = new THREE.Mesh(buildFaceGeometry(tiles, face, GLOBE_RADIUS, RELIEF_EXAGGERATION), material);
+    const mesh = new THREE.Mesh(
+      buildFaceGeometry(tiles, face, GLOBE_RADIUS, RELIEF_EXAGGERATION, colorAt),
+      material,
+    );
     mesh.name = `globe-face-${face}`;
     spinGroup.add(mesh);
     faceMeshes.push(mesh);
@@ -299,7 +307,7 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
   let trueGeoms: THREE.BufferGeometry[] | null = null;
   function setTrueRelief(on: boolean): void {
     if (on && trueGeoms === null) {
-      trueGeoms = Array.from({ length: 6 }, (_, f) => buildFaceGeometry(tiles, f, GLOBE_RADIUS, 1));
+      trueGeoms = Array.from({ length: 6 }, (_, f) => buildFaceGeometry(tiles, f, GLOBE_RADIUS, 1, colorAt));
       stitchNormals(trueGeoms);
       // Freshly built geometry starts unfrozen; force the next update() to
       // paint it for the day already in effect (the day-unchanged guard in

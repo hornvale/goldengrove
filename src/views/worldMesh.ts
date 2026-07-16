@@ -6,8 +6,7 @@
  */
 import * as THREE from 'three';
 import type { TilesScene } from '../sim/scene';
-import { elevationColor } from '../sim/palette';
-import { biomeColorForName } from './biomePalette';
+import type { RGB } from './lens';
 import { TILE_QUADS, tileGrid } from './cubeSphere';
 
 /** Reference body radius (Earth's, meters) used only to turn raw elevation
@@ -59,6 +58,7 @@ export function buildFaceGeometry(
   face: number,
   radius: number,
   reliefScale: number,
+  colorAt: (i: number) => RGB,
 ): THREE.BufferGeometry {
   const grid = tileGrid({ face, level: 0, ix: 0, iy: 0 });
   const n = TILE_QUADS + 1;
@@ -73,10 +73,7 @@ export function buildFaceGeometry(
     positions[3 * i + 1] = grid.units[3 * i + 1]! * radiusAt;
     positions[3 * i + 2] = grid.units[3 * i + 2]! * radiusAt;
 
-    const ocean = sampleTile(tiles, lat, lon, 'ocean');
-    const rgb = ocean
-      ? elevationColor(elevation, tiles.sea_level_m)
-      : biomeColorForName(tiles.biomeLegend[sampleTile(tiles, lat, lon, 'biome')] ?? '');
+    const rgb = colorAt(tileIndex(tiles, lat, lon));
     colors[3 * i] = rgb[0] / 255;
     colors[3 * i + 1] = rgb[1] / 255;
     colors[3 * i + 2] = rgb[2] / 255;

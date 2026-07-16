@@ -17,6 +17,7 @@ import { rotationPhase, worldPhase } from '../sim/ephemeris';
 import { starTint } from '../sim/palette';
 import { fnv1a32, mulberry32 } from '../util/prng';
 import { buildFaceGeometry } from './worldMesh';
+import { naturalLens } from './lens';
 import { moonOrbitRadiusUnits, moonRadiusUnits, starRadiusUnits, worldRadiusUnits } from './scale';
 
 const TAU = Math.PI * 2;
@@ -168,8 +169,11 @@ export function createSystemView(sys: SystemScene, tiles: TilesScene): SystemVie
   const worldSpin = new THREE.Object3D();
   worldSpin.name = 'world-spin';
   const worldMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.05 });
+  // Task 6 replaces this constant with the selected lens; today the system
+  // view always renders `natural`, exactly as it did before this lens existed.
+  const colorAt = (i: number) => naturalLens.colorAt(tiles, i, 0);
   for (let face = 0; face < 6; face++) {
-    worldSpin.add(new THREE.Mesh(buildFaceGeometry(tiles, face, WORLD_RADIUS, 0), worldMaterial));
+    worldSpin.add(new THREE.Mesh(buildFaceGeometry(tiles, face, WORLD_RADIUS, 0, colorAt), worldMaterial));
   }
   // The mesh's polar axis is its local +z (cubeSphere's lat = asin(z));
   // stand it out of the orbit plane, leaning by the document's obliquity —
