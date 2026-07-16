@@ -31,6 +31,7 @@ function tinyTiles(): TilesScene {
     features: [{ name: 'Daoqao', kind: 'settlement', latitude: 60, longitude: -170 }],
     t_mean_c: Array(8).fill(15), t_swing_c: Array(8).fill(5),
     season_period_days: 365, circulationBands: null, moisture: Array(8).fill(0.5),
+    plate: Array(8).fill(0), unrest: Array(8).fill(0),
   };
 }
 

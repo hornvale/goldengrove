@@ -11,6 +11,7 @@ function flatTiles(): TilesScene {
     biome: Array(n).fill(0), biomeLegend: ['steppe'], features: [],
     t_mean_c: Array(n).fill(15), t_swing_c: Array(n).fill(5),
     season_period_days: 365, circulationBands: null, moisture: Array(n).fill(0.5),
+    plate: Array(n).fill(0), unrest: Array(n).fill(0),
   };
 }
 
@@ -25,6 +26,7 @@ function bumpyTiles(): TilesScene {
     biome: Array(n).fill(0), biomeLegend: ['steppe'], features: [],
     t_mean_c: Array(n).fill(15), t_swing_c: Array(n).fill(5),
     season_period_days: 365, circulationBands: null, moisture: Array(n).fill(0.5),
+    plate: Array(n).fill(0), unrest: Array(n).fill(0),
   };
 }
 
