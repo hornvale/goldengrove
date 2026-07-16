@@ -15,15 +15,23 @@ const AU_SCALE = 3;
 /** Reference radii, megameters: Earth, Sol, Luna. */
 const EARTH_RADIUS_MM = 6.371;
 const SOL_RADIUS_MM = 696;
-const LUNA_RADIUS_MM = 1.7375;
+/** Luna's reference radius, megameters — used for the `sizeRel`-driven
+ * moon-sphere scale below. `./moonShading.ts`'s physical (`radiusKm`)
+ * scale uses the producer's own more precise `1737.4` km constant instead
+ * of re-deriving it from this rounded megameter value. */
+export const LUNA_RADIUS_MM = 1.7375;
 /** Schematic constants — mirror system.ts. */
 const STAR_RADIUS = 0.35;
 const WORLD_RADIUS = 0.12;
-const MOON_RADIUS = 0.045;
+/** Schematic moon sphere radius (world units) — exported for
+ * `./moonShading.ts`'s physical-radius variant of this same scale. */
+export const MOON_RADIUS = 0.045;
 const MOON_RUNG_BASE = 0.32;
 const MOON_RUNG_STEP = 0.22;
 
-const mmToUnits = (mm: number) => (mm / MM_PER_AU) * AU_SCALE;
+/** Convert a physical length in megameters to world units, at the AU scale
+ * that governs the whole system view — exported for `./moonShading.ts`. */
+export const mmToUnits = (mm: number) => (mm / MM_PER_AU) * AU_SCALE;
 
 /** Moon `i`'s orbit radius (world units): even ladder, or true distance. */
 export function moonOrbitRadiusUnits(i: number, distanceMm: number, trueScale: boolean): number {

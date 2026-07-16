@@ -12,13 +12,15 @@
  * expected to caption this (ORRERY-scale-honesty's lesson: admit the lie).
  */
 import * as THREE from 'three';
-import type { SystemScene, TilesScene } from '../sim/scene';
+import type { MoonsScene, SystemScene, TilesScene } from '../sim/scene';
 import { rotationPhase, worldPhase } from '../sim/ephemeris';
 import { starTint } from '../sim/palette';
 import { fnv1a32, mulberry32 } from '../util/prng';
 import { buildFaceGeometry } from './worldMesh';
 import { naturalLens } from './lens';
-import { moonOrbitRadiusUnits, moonRadiusUnits, starRadiusUnits, worldRadiusUnits } from './scale';
+import { moonOrbitRadiusUnits, starRadiusUnits, worldRadiusUnits } from './scale';
+import { moonBaseColor, moonRadiusUnitsFromKm } from './moonShading';
+import { moonTexture } from './moonTexture';
 
 const TAU = Math.PI * 2;
 
@@ -132,8 +134,11 @@ function buildOrbitLine(radiusUnits: number): THREE.LineLoop {
  * class, an HZ annulus, the world's orbit line, the world itself (six
  * cube-sphere faces wearing the real tile colors, spun by rotationPhase),
  * and its moons — all positioned by `update(day)` from the golden-pinned
- * ephemeris. */
-export function createSystemView(sys: SystemScene, tiles: TilesScene): SystemView {
+ * ephemeris. `moons` (`scene/moons/v1`, parsed) supplies each moon sphere's
+ * shading and physical size (`../views/moonShading.ts`); its `moons` array
+ * is indexed in lockstep with `sys.moons` (both come from the same
+ * catalog's genesis, in the same per-moon order). */
+export function createSystemView(sys: SystemScene, tiles: TilesScene, moons: MoonsScene): SystemView {
   const root = new THREE.Object3D();
   root.name = 'system-root';
 
@@ -189,13 +194,18 @@ export function createSystemView(sys: SystemScene, tiles: TilesScene): SystemVie
   worldGroup.add(worldAxis);
   root.add(worldGroup);
 
-  const moonMeshes: THREE.Mesh[] = sys.moons.map((m, i) => {
+  const moonMeshes: THREE.Mesh[] = sys.moons.map((_m, i) => {
+    const surface = moons.moons[i]!;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(1, 12, 8), // unit sphere: scaled per mode below
-      new THREE.MeshStandardMaterial({ color: 0xa8a8a8, roughness: 1 }),
+      new THREE.MeshStandardMaterial({
+        color: moonBaseColor(surface),
+        map: moonTexture(sys.seed, i, surface),
+        roughness: 1,
+      }),
     );
     mesh.name = `moon-${i}`;
-    mesh.scale.setScalar(moonRadiusUnits(m.sizeRel, false));
+    mesh.scale.setScalar(moonRadiusUnitsFromKm(surface.radiusKm, false));
     worldGroup.add(mesh);
     return mesh;
   });
@@ -227,7 +237,7 @@ export function createSystemView(sys: SystemScene, tiles: TilesScene): SystemVie
     star.scale.setScalar(starRadiusUnits(on));
     worldSpin.scale.setScalar(worldRadiusUnits(on) / WORLD_RADIUS);
     for (let i = 0; i < moonMeshes.length; i++) {
-      moonMeshes[i]!.scale.setScalar(moonRadiusUnits(sys.moons[i]!.sizeRel, on));
+      moonMeshes[i]!.scale.setScalar(moonRadiusUnitsFromKm(moons.moons[i]!.radiusKm, on));
     }
   }
 
