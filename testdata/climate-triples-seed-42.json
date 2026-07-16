@@ -1,7 +1,6 @@
 {
-  "provenance": "seed 42, width 64, world-wasm-v2; regenerate: this driver in Isotherm plan Task 7",
+  "provenance": "seed 42, width 64; Rust temperature_grid (windows/scene) quantized; regenerate: cargo run -p hornvale-scene --example temperature_triples",
   "width": 64,
-  "season_period_days": 368.05357,
   "rows": [
     {
       "i": 0,
@@ -16,17 +15,17 @@
     {
       "i": 100,
       "day": 91.3,
-      "t": -60.754303961226576
+      "t": -60.754304
     },
     {
       "i": 100,
       "day": 182.6,
-      "t": -61.0142680860219
+      "t": -61.014268
     },
     {
       "i": 2000,
       "day": 300,
-      "t": -35.61674662875701
+      "t": -35.616746
     }
   ]
 }

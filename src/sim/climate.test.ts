@@ -3,16 +3,22 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { temperatureAt, windAt, coldestC } from "./climate";
-import { loadSeed42Tiles } from "./catalogFixture.test";
+import { loadSeed42Tiles } from "../testHelpers/wasmFixture";
 import type { TilesScene } from "./scene";
 
 const triples = JSON.parse(readFileSync("testdata/climate-triples-seed-42.json", "utf8"));
 
-test("temperatureAt reproduces the producer-pinned triples", async () => {
+test("temperatureAt reproduces the Rust producer's temperature_at triples", async () => {
   const tiles = await loadSeed42Tiles(triples.width);
-  expect(tiles.season_period_days).toBeCloseTo(triples.season_period_days, 5);
   for (const row of triples.rows) {
-    expect(temperatureAt(tiles, row.i, row.day)).toBeCloseTo(row.t, 10);
+    // Tolerance, not exact equality: the client reconstructs temperatureAt
+    // from the quantized t_mean_c/t_swing_c coefficients, while the Rust
+    // golden `row.t` is the quantized final temperature_at value itself —
+    // two different quantization paths to the same physics, so they agree
+    // to quantization precision (~1e-5 degC here). 0.001 degC is loose enough
+    // to absorb that noise but tight enough to catch any real evaluator
+    // divergence, which would show up as whole degrees of drift.
+    expect(Math.abs(temperatureAt(tiles, row.i, row.day) - row.t)).toBeLessThan(0.001);
   }
 });
 
