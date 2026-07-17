@@ -12,15 +12,15 @@
  * expected to caption this (ORRERY-scale-honesty's lesson: admit the lie).
  */
 import * as THREE from 'three';
-import type { MoonsScene, SystemScene, TilesScene } from '../sim/scene';
+import type { MoonsScene, NeighborsScene, SystemScene, TilesScene } from '../sim/scene';
 import { rotationPhase, worldPhase } from '../sim/ephemeris';
 import { starTint } from '../sim/palette';
-import { fnv1a32, mulberry32 } from '../util/prng';
 import { buildFaceGeometry } from './worldMesh';
 import { naturalLens } from './lens';
 import { moonOrbitRadiusUnits, starRadiusUnits, worldRadiusUnits } from './scale';
 import { moonBaseColor, moonRadiusUnitsFromKm } from './moonShading';
 import { moonTexture } from './moonTexture';
+import { buildRealStarfield } from './starfield';
 
 const TAU = Math.PI * 2;
 
@@ -31,7 +31,6 @@ const AU_SCALE = 3;
 const STAR_RADIUS = 0.35;
 const WORLD_RADIUS = 0.12;
 const ORBIT_SEGMENTS = 128;
-const STARFIELD_COUNT = 400;
 
 /** The world's orbital angle (radians) around the star at `day`. The
  * golden-pinned `worldPhase` is the single source of angular truth for the
@@ -97,29 +96,6 @@ export interface SystemView {
   setTrueScale(on: boolean): void;
 }
 
-/** Cosmetic starfield: a scattered point cloud seeded from `sys.seed` only
- * (never from any other scene field) — flavor, not physics. */
-function buildStarfield(seed: number, reach: number): THREE.Points {
-  const rand = mulberry32(fnv1a32(`goldengrove/starfield/${seed}`));
-  const positions = new Float32Array(STARFIELD_COUNT * 3);
-  const shellRadius = reach * 3;
-  for (let i = 0; i < STARFIELD_COUNT; i++) {
-    // Uniform-on-sphere via normalized Gaussian-free rejection-free method:
-    // pick a direction from two angles, a radius biased outward so stars
-    // don't clump at the center.
-    const theta = rand() * TAU;
-    const phi = Math.acos(2 * rand() - 1);
-    const r = shellRadius * (0.6 + 0.4 * rand());
-    positions[3 * i] = r * Math.sin(phi) * Math.cos(theta);
-    positions[3 * i + 1] = r * Math.cos(phi);
-    positions[3 * i + 2] = r * Math.sin(phi) * Math.sin(theta);
-  }
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.PointsMaterial({ color: 0xaabbdd, size: 0.02, sizeAttenuation: true });
-  return new THREE.Points(geom, mat);
-}
-
 function buildOrbitLine(radiusUnits: number): THREE.LineLoop {
   const points: THREE.Vector3[] = [];
   for (let i = 0; i < ORBIT_SEGMENTS; i++) {
@@ -137,8 +113,16 @@ function buildOrbitLine(radiusUnits: number): THREE.LineLoop {
  * ephemeris. `moons` (`scene/moons/v1`, parsed) supplies each moon sphere's
  * shading and physical size (`../views/moonShading.ts`); its `moons` array
  * is indexed in lockstep with `sys.moons` (both come from the same
- * catalog's genesis, in the same per-moon order). */
-export function createSystemView(sys: SystemScene, tiles: TilesScene, moons: MoonsScene): SystemView {
+ * catalog's genesis, in the same per-moon order). `neighbors`
+ * (`scene/neighbors/v1`, parsed) supplies the real night sky — the world's
+ * drawn neighbor stars plus its derived background field
+ * (`./starfield.ts`) — replacing the earlier cosmetic random point cloud. */
+export function createSystemView(
+  sys: SystemScene,
+  tiles: TilesScene,
+  moons: MoonsScene,
+  neighbors: NeighborsScene,
+): SystemView {
   const root = new THREE.Object3D();
   root.name = 'system-root';
 
@@ -211,7 +195,7 @@ export function createSystemView(sys: SystemScene, tiles: TilesScene, moons: Moo
   });
 
   const reach = Math.max(orbitRadius, hzOuter);
-  root.add(buildStarfield(sys.seed, reach));
+  root.add(buildRealStarfield(neighbors, sys.world.obliquityDeg, reach));
 
   let trueScale = false;
 

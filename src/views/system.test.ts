@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import * as THREE from 'three';
 import { createSystemView, orbitAngle, moonLocalPosition } from './system';
 import { rotationPhase } from '../sim/ephemeris';
-import type { MoonsScene, SystemScene, TilesScene } from '../sim/scene';
+import type { MoonsScene, NeighborsScene, SystemScene, TilesScene } from '../sim/scene';
 
 // Names adapted to the parsed (camelCase) SystemScene shape — the brief's
 // sketch uses raw scene/system/v1 snake_case, but parseSystem in ./scene.ts
@@ -53,6 +53,13 @@ function oneMoonMoons(): MoonsScene {
   };
 }
 
+/** An empty `NeighborsScene` — createSystemView only needs a document
+ * shaped correctly; the star-position tests below don't care about the
+ * sky's contents. */
+function emptyNeighbors(): NeighborsScene {
+  return { schema: 'scene/neighbors/v1', seed: 42, neighbors: [], stars: [] };
+}
+
 /** 4×2 all-land tiles — createSystemView only needs a valid lattice. */
 function tinyTiles(): TilesScene {
   const n = 8;
@@ -84,7 +91,7 @@ test('a tidally locked world keeps longitude 0 facing the star all year', () => 
     ...sys,
     world: { orbitAu: 1, yearDays: 360, dayLengthDays: null, obliquityDeg: 0, yearPhaseOffset: 0.25 },
   };
-  const view = createSystemView(locked, tinyTiles(), oneMoonMoons());
+  const view = createSystemView(locked, tinyTiles(), oneMoonMoons(), emptyNeighbors());
   for (const day of [0, 90, 137.5, 270]) {
     view.update(day);
     expect(meshLonDirection(view, 0).dot(toStar(view, day))).toBeCloseTo(1, 6);
@@ -96,7 +103,7 @@ test("a spinning world's subsolar longitude matches the globe view's golden swee
     ...sys,
     world: { orbitAu: 1, yearDays: 360, dayLengthDays: 1, obliquityDeg: 0, yearPhaseOffset: 0.25 },
   };
-  const view = createSystemView(spinning, tinyTiles(), oneMoonMoons());
+  const view = createSystemView(spinning, tinyTiles(), oneMoonMoons(), emptyNeighbors());
   for (const day of [0, 0.3, 42.75, 200.5]) {
     view.update(day);
     // The globe view pins the light at azimuth 0 and spins the ground by
@@ -107,7 +114,7 @@ test("a spinning world's subsolar longitude matches the globe view's golden swee
 });
 
 test('the pole stands out of the orbit plane, leaning by the obliquity, without precessing', () => {
-  const view = createSystemView(sys, tinyTiles(), oneMoonMoons()); // obliquityDeg 20
+  const view = createSystemView(sys, tinyTiles(), oneMoonMoons(), emptyNeighbors()); // obliquityDeg 20
   const poleAt = (day: number) => {
     view.update(day);
     view.object3d.updateMatrixWorld(true);

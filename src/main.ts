@@ -20,7 +20,7 @@ import { createGlobeView, RELIEF_EXAGGERATION } from './views/globe';
 import { lensById, naturalLens } from './views/lens';
 import { ZoomController, dollyLookAt, dollyPosition, wheelHandoff, type ZoomTarget } from './views/zoom';
 import { SPEED_POLICY, SpeedMemory, clampMult } from './time/speedPolicy';
-import type { MoonsScene, SystemScene, TilesScene } from './sim/scene';
+import type { MoonsScene, NeighborsScene, SystemScene, TilesScene } from './sim/scene';
 import { defaultAppState, parseAppState, seedError, serializeAppState, type AppState } from './state/url';
 import { randomSeed } from './ui/seed';
 import type { WorkerErrorKind } from './sim/worker';
@@ -106,7 +106,7 @@ function boot(): void {
   worker.onmessage = (ev: MessageEvent) => {
     const msg = ev.data;
     if (msg.type === 'world') {
-      mountViews(msg.system, msg.moons, msg.tiles, state);
+      mountViews(msg.system, msg.moons, msg.neighbors, msg.tiles, state);
     } else if (msg.type === 'error') {
       const kind = msg.kind as WorkerErrorKind;
       renderError(kind, titleFor(kind), msg.message, state.seed);
@@ -116,7 +116,13 @@ function boot(): void {
   worker.postMessage({ type: 'generate', seed: state.seed, tilesWidth: 512 });
 }
 
-function mountViews(system: SystemScene, moons: MoonsScene, tiles: TilesScene, state: AppState): void {
+function mountViews(
+  system: SystemScene,
+  moons: MoonsScene,
+  neighbors: NeighborsScene,
+  tiles: TilesScene,
+  state: AppState,
+): void {
   app.innerHTML = '';
 
   const stage = document.createElement('div');
@@ -141,7 +147,7 @@ function mountViews(system: SystemScene, moons: MoonsScene, tiles: TilesScene, s
   const systemScene = new THREE.Scene();
   systemScene.background = new THREE.Color(0x03050a);
   systemScene.add(new THREE.AmbientLight(0x404050, 1.2));
-  const systemView = createSystemView(system, tiles, moons);
+  const systemView = createSystemView(system, tiles, moons, neighbors);
   systemScene.add(systemView.object3d);
   const systemReach = Math.max(system.world.orbitAu, system.star.hzOuterAu) * 3 + 2;
   let systemFraming = new THREE.Vector3(0, systemReach * 0.6, systemReach);

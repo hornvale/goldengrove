@@ -1,6 +1,6 @@
 // worker.ts — genesis off the main thread (it takes seconds).
 import { CatalogFetchError, loadCatalog } from "./catalog";
-import { parseMoons, parseSystem, parseTiles, SceneFormatError } from "./scene";
+import { parseMoons, parseNeighbors, parseSystem, parseTiles, SceneFormatError } from "./scene";
 
 /** How main.ts distinguishes the three worker failure modes it renders as
  * distinct, styled full-screen states: the catalog binary itself never
@@ -31,8 +31,9 @@ self.onmessage = async (ev: MessageEvent) => {
     catalog.generate(BigInt(seed), pins);
     const system = parseSystem(catalog.sceneSystem());
     const moons = parseMoons(catalog.sceneMoons());
+    const neighbors = parseNeighbors(catalog.sceneNeighbors());
     const tiles = parseTiles(catalog.sceneTiles(tilesWidth));
-    self.postMessage({ type: "world", system, moons, tiles });
+    self.postMessage({ type: "world", system, moons, neighbors, tiles });
   } catch (err) {
     self.postMessage({
       type: "error",
