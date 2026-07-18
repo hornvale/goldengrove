@@ -79,6 +79,10 @@ export interface TilesScene {
   t_mean_c: number[];
   /** Seasonal temperature swing (peak-to-mean amplitude) per tile, degrees Celsius — row-major, matching `elevation_m`. */
   t_swing_c: number[];
+  /** Diurnal (day/night) half-range amplitude per tile, degrees Celsius —
+   * row-major, matching `elevation_m`. Multiply by `diurnalWaveform(...)`
+   * (./diurnal) to get the day/night temperature anomaly. */
+  tDiurnalAmpC: number[];
   /** The length of one seasonal cycle, in standard days. */
   season_period_days: number;
   /** The world's count of atmospheric circulation bands; `null` when the world is tidally locked and has none. */
@@ -527,6 +531,7 @@ export function parseTiles(text: string): TilesScene {
     features: features.map(parseFeature),
     t_mean_c: numberArray(doc, "t_mean_c", tiles),
     t_swing_c: numberArray(doc, "t_swing_c", tiles),
+    tDiurnalAmpC: numberArray(doc, "t_diurnal_amp_c", tiles),
     season_period_days: seasonPeriodDays,
     circulationBands,
     moisture: numberArray(doc, "moisture", tiles),

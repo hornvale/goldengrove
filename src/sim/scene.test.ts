@@ -106,6 +106,7 @@ function validTiles(): Record<string, unknown> {
     features: [{ name: 'Anchorhold', kind: 'flagship', latitude: 12.5, longitude: -3.25 }],
     t_mean_c: Array(tiles).fill(15.0),
     t_swing_c: Array(tiles).fill(5.0),
+    t_diurnal_amp_c: Array(tiles).fill(8.0),
     season_period_days: 365.25,
     circulation_bands: 3,
     moisture: Array(tiles).fill(0.5),
@@ -178,9 +179,22 @@ describe('parseTiles', () => {
     const t = parseTiles(JSON.stringify(validTiles()));
     expect(t.t_mean_c.length).toEqual(128);
     expect(t.t_swing_c.length).toEqual(128);
+    expect(t.tDiurnalAmpC.length).toEqual(128);
     expect(t.moisture.length).toEqual(128);
     expect(t.season_period_days).toEqual(365.25);
     expect(t.circulationBands).toEqual(3);
+  });
+
+  it('rejects a t_diurnal_amp_c whose length disagrees with the lattice', () => {
+    const doc = validTiles();
+    (doc.t_diurnal_amp_c as number[]).pop();
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('t_diurnal_amp_c');
+  });
+
+  it('rejects a document missing t_diurnal_amp_c', () => {
+    const doc = validTiles();
+    delete doc.t_diurnal_amp_c;
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('t_diurnal_amp_c');
   });
 
   it('treats an absent circulation_bands as null (locked world)', () => {

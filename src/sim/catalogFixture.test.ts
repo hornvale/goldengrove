@@ -22,6 +22,12 @@ test("the vendored binary's tiles document parses strictly", async () => {
   expect(tiles.circulationBands).toBe(3); // seed 42 spins Earth-like
 });
 
+test("the vendored binary carries the diurnal amplitude layer", async () => {
+  const tiles = await loadSeed42Tiles(64);
+  expect(tiles.tDiurnalAmpC.length).toBeGreaterThan(0);
+  expect(tiles.tDiurnalAmpC.some((a) => a > 0)).toBe(true);
+});
+
 test("the vendored binary's system document parses strictly", async () => {
   const sys = await loadSeed42System();
   expect(sys.schema).toBe("scene/system/v1");

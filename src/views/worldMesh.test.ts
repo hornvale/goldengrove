@@ -26,7 +26,7 @@ function flatTiles(): TilesScene {
     schema: 'scene/tiles/v1', width: 4, height: 2, sea_level_m: 0,
     elevation_m: Array(n).fill(1000), ocean: Array(n).fill(false),
     biome: Array(n).fill(0), biomeLegend: ['steppe'], features: [],
-    t_mean_c: Array(n).fill(15), t_swing_c: Array(n).fill(5),
+    t_mean_c: Array(n).fill(15), t_swing_c: Array(n).fill(5), tDiurnalAmpC: Array(n).fill(8),
     season_period_days: 365, circulationBands: null, moisture: Array(n).fill(0.5),
     plate: Array(n).fill(0), unrest: Array(n).fill(0), locked: false,
   };
@@ -41,7 +41,7 @@ function bumpyTiles(): TilesScene {
     schema: 'scene/tiles/v1', width, height, sea_level_m: 0,
     elevation_m, ocean: Array(n).fill(false),
     biome: Array(n).fill(0), biomeLegend: ['steppe'], features: [],
-    t_mean_c: Array(n).fill(15), t_swing_c: Array(n).fill(5),
+    t_mean_c: Array(n).fill(15), t_swing_c: Array(n).fill(5), tDiurnalAmpC: Array(n).fill(8),
     season_period_days: 365, circulationBands: null, moisture: Array(n).fill(0.5),
     plate: Array(n).fill(0), unrest: Array(n).fill(0), locked: false,
   };
