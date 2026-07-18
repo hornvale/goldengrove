@@ -69,6 +69,18 @@ export function subsolarPoint(sys: SystemScene, day: number): { lat: number; lon
   return { lat, lon };
 }
 
+/** The mesh's diurnal spin, day-driven — `subsolarPoint`'s frozen twin.
+ * `hold=false` reproduces today's spin (`rotationPhase(sys, day) * TAU`);
+ * `hold=true` (the seasonal hold, engaged at the fast rates Task 8 unlocked)
+ * fixes it at a reference rotation (0) so the planet holds a face while the
+ * light's latitude (from `subsolarPoint`, untouched by `hold`) keeps
+ * advancing with the season — the sun visibly drifts N/S over a watched
+ * year instead of blurring into a diurnal smear. A no-op on a tidally
+ * locked world: `rotationPhase` already gives it no sweep to freeze. */
+export function seasonalSpinZ(sys: SystemScene, day: number, hold: boolean): number {
+  return hold ? 0 : rotationPhase(sys, day) * TAU;
+}
+
 /** Unit vector for a (lat, lon) in degrees — the inverse of `cubeSphere.ts`'s
  * `unitLatLon` (lat = asin(z), lon = atan2(y, x)). */
 function latLonToUnit(latDeg: number, lonDeg: number): THREE.Vector3 {
@@ -228,6 +240,13 @@ export interface GlobeView {
   /** Show or hide the prevailing-wind overlay — a no-op on a tidally locked
    * world, where `createWinds` built nothing to show. */
   setWinds(on: boolean): void;
+  /** Toggle the seasonal hold (Task 9): freezes the mesh's diurnal spin
+   * (`spinGroup.rotation.z`, via `seasonalSpinZ`) while the terminator light
+   * keeps tracking the sub-solar latitude, so a year's seasons are watchable
+   * at the fast clock rates without the daily spin blurring the picture.
+   * `main.ts` engages it once the active clock mult crosses the old
+   * (pre-Task-8) globe cap. Off by default, matching today's spin. */
+  setSeasonalHold(on: boolean): void;
 }
 
 /** Build the globe view: a cube-sphere mesh displaced by real relief,
@@ -424,15 +443,25 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
     selectedGroup = featureName === null ? null : `feature-${featureName}`;
   }
 
+  // Task 9's seasonal hold: freezes spinGroup's diurnal spin at the fast
+  // clock rates so a year is watchable with the planet holding a face — see
+  // `seasonalSpinZ`'s doc comment. Off by default, matching today's spin.
+  let seasonalHold = false;
+  function setSeasonalHold(on: boolean): void {
+    seasonalHold = on;
+  }
+
   const upWorld = new THREE.Vector3(); // update()'s scratch — no per-frame allocation
   const zAxis = new THREE.Vector3(0, 0, 1);
   function update(day: number, camera?: THREE.Camera): void {
     const sub = subsolarPoint(sys, day);
     // Fixed reference azimuth 0: the daily sweep comes from spinning
     // spinGroup below, not from moving the light's longitude — see the
-    // function doc's derivation.
+    // function doc's derivation. The light is unaffected by the seasonal
+    // hold: its latitude term keeps advancing regardless, which is the
+    // whole point of freezing the mesh instead of the light.
     light.position.copy(latLonToUnit(sub.lat, 0)).multiplyScalar(LIGHT_DISTANCE);
-    spinGroup.rotation.z = rotationPhase(sys, day) * TAU;
+    spinGroup.rotation.z = seasonalSpinZ(sys, day, seasonalHold);
     ocean.update(day);
     // The active lens (and ice, under natural) is blended into the base
     // vertex color before the material's lighting, so it inherits the
@@ -450,7 +479,7 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
 
   update(0);
 
-  return { object3d: root, update, setTrueRelief, setSelected, setLens, setWinds };
+  return { object3d: root, update, setTrueRelief, setSelected, setLens, setWinds, setSeasonalHold };
 }
 
 /** The tile index vertex `v` of face `face`'s level-0 geometry maps to — the

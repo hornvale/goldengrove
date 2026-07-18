@@ -35,6 +35,14 @@ const GROUND_CAPTION = `relief is exaggerated ${RELIEF_EXAGGERATION}× over true
 const TRUE_SPACE_CAPTION =
   'true scale: distances are true to the documents; body sizes use reference radii (Earth/Sol/Luna) — the documents carry no absolute radii. The bodies all but vanish against the orbit’s sweep; zoom in and find them.';
 const TRUE_GROUND_CAPTION = `relief at true scale (1×): the mountains are down there — the sphere just doesn’t show them at this size. That’s the honest render. ${ICE_CAPTION}`;
+const SEASONAL_HOLD_CAPTION =
+  'holding the daily spin — watching the year: the sub-solar latitude and ice line keep advancing with the season while the globe holds a face.';
+
+/** The pre-Task-8 globe speed cap (`SPEED_POLICY`'s old `maxMult`, still the
+ * threshold above which the daily spin is a blur, not the current one —
+ * Task 8 raised the cap itself, this crosses it) — the active clock mult
+ * crossing it engages the seasonal hold (Task 9). */
+const SEASONAL_HOLD_MULT = 86400;
 
 /** The plain "still generating" state — replaced by either a mounted world
  * or one of `renderError`'s distinct failure screens. */
@@ -209,11 +217,27 @@ function mountViews(
   // true-scale): it starts hidden, matching `createWinds`'s built geometry.
   let windsOn = false;
 
+  // Task 9's seasonal hold: a single flag (not per-rung — it tracks the
+  // active clock mult, which is shared) reflecting whether the globe's
+  // diurnal spin is currently frozen.
+  let seasonalHoldOn = false;
+
   function setCaptionFor(v: ZoomTarget): void {
-    caption.textContent =
-      v === 'system'
-        ? (trueScaleOn.system ? TRUE_SPACE_CAPTION : SPACE_CAPTION)
-        : (trueScaleOn.globe ? TRUE_GROUND_CAPTION : GROUND_CAPTION);
+    if (v === 'system') {
+      caption.textContent = trueScaleOn.system ? TRUE_SPACE_CAPTION : SPACE_CAPTION;
+      return;
+    }
+    const base = trueScaleOn.globe ? TRUE_GROUND_CAPTION : GROUND_CAPTION;
+    caption.textContent = seasonalHoldOn ? `${base} ${SEASONAL_HOLD_CAPTION}` : base;
+  }
+
+  /** Engages/disengages the globe's seasonal hold (Task 9) for the given
+   * active clock mult and refreshes the caption — called wherever the mult
+   * changes (boot, rung switch, and a direct speed pick). */
+  function applySeasonalHold(mult: number): void {
+    seasonalHoldOn = mult > SEASONAL_HOLD_MULT;
+    globeView.setSeasonalHold(seasonalHoldOn);
+    setCaptionFor(view);
   }
   function setViewButtonFor(v: ZoomTarget): void {
     hud.setViewButton(v === 'system' ? 'view: globe' : 'view: system', true);
@@ -299,7 +323,7 @@ function mountViews(
     dayAtPlayStart = day;
     hud.setMaxSpeed(SPEED_POLICY[view].maxMult);
     hud.setActiveSpeed(mult);
-    setCaptionFor(view);
+    applySeasonalHold(mult);
     setViewButtonFor(view);
     systemCanvas.style.pointerEvents = v === 'system' ? 'auto' : 'none';
     globeCanvas.style.pointerEvents = v === 'globe' ? 'auto' : 'none';
@@ -370,6 +394,7 @@ function mountViews(
       playStartMs = performance.now();
       dayAtPlayStart = day;
       hud.setActiveSpeed(clamped); // corrects the button if the click was over-cap
+      applySeasonalHold(clamped);
     },
     onTrueScale() {
       trueScaleOn[view] = !trueScaleOn[view];
@@ -427,7 +452,7 @@ function mountViews(
     hud.setDate(formatRawDate(dayToRawDate(day, system.world.yearDays)));
   }
   const hud = buildHud(hudRoot, state.seed, cb);
-  setCaptionFor(view);
+  applySeasonalHold(speedMemory.restore(view)); // also sets the initial caption
   setViewButtonFor(view);
   // Stacked canvases must route input to the visible rung only — mirrors
   // applyView's pointer-events lines for the initial view (hud isn't built

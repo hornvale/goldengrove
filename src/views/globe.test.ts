@@ -8,15 +8,19 @@ import {
   createGlobeView,
   onNearSide,
   sampleTile,
+  seasonalSpinZ,
   subsolarPoint,
   tileIndexOfVertex,
 } from './globe';
 import { REFERENCE_RADIUS_M } from './worldMesh';
 import { TILE_QUADS } from './cubeSphere';
 import { iceFraction } from './ice';
+import { rotationPhase } from '../sim/ephemeris';
 import type { SystemScene, TilesScene } from '../sim/scene';
 import { loadSeed42Tiles, loadSeed42System } from '../testHelpers/wasmFixture';
 import { moistureLens, naturalLens, temperatureLens } from './lens';
+
+const TAU = Math.PI * 2;
 
 test('sampleTile maps lat/lon to the row-major equirect lattice', () => {
   // 4×2 lattice: row 0 is lat +90..0, col 0 is lon -180.
@@ -68,6 +72,33 @@ test('subsolar longitude sweeps a full turn per day_length_days for a spinning w
   expect(b).toBeCloseTo(a, 8);
   const quarter = subsolarPoint(sys, 0.25).lon;
   expect(quarter).not.toBeCloseTo(a, 3);
+});
+
+test('seasonalSpinZ freezes the spin at a fixed reference regardless of day when hold is on', () => {
+  const sys = spinningSys();
+  // Fractional days: dayLengthDays is 1 here, so integer days would land on
+  // the same phase even unfrozen and mask a mutation that ignored `hold`.
+  expect(seasonalSpinZ(sys, 10.3, true)).toBe(0);
+  expect(seasonalSpinZ(sys, 10.3, true)).toBe(seasonalSpinZ(sys, 200.7, true));
+  // Confirms this isn't a coincidence of the chosen days: the unfrozen spin
+  // at the same days actually differs from the frozen 0.
+  expect(seasonalSpinZ(sys, 10.3, false)).not.toBe(0);
+});
+
+test('seasonalSpinZ reproduces today\'s spin when hold is off', () => {
+  const sys = spinningSys();
+  expect(seasonalSpinZ(sys, 10.3, false)).toBeCloseTo(rotationPhase(sys, 10.3) * TAU, 10);
+  // dayLengthDays is 1 here, so integer days share a phase — compare
+  // fractional days to actually observe the sweep.
+  expect(seasonalSpinZ(sys, 10.3, false)).not.toBeCloseTo(seasonalSpinZ(sys, 200.7, false), 3);
+});
+
+test('sub-solar latitude keeps advancing with day independent of the spin freeze', () => {
+  const sys = spinningSys();
+  // subsolarPoint takes no hold parameter — its latitude term (obliquity ×
+  // year phase) is untouched by seasonalSpinZ's freeze either way, which is
+  // exactly what lets the season keep moving while the mesh holds still.
+  expect(subsolarPoint(sys, 10).lat).not.toBeCloseTo(subsolarPoint(sys, 200).lat, 3);
 });
 
 /** Minimal spinning system for createGlobeView. */
@@ -188,6 +219,32 @@ test('update(day, camera) hides far-side markers and shows near ones', () => {
   camera.position.copy(facing).negate();
   view.update(0, camera);
   expect(dot.visible).toBe(false);
+});
+
+test('setSeasonalHold(true) freezes globe-spin rotation across days', () => {
+  const view = createGlobeView(markerTiles([]), spinningSys());
+  view.setSeasonalHold(true);
+  // Fractional days: dayLengthDays is 1 here, so integer days would land on
+  // the same phase even unfrozen and mask a mutation that ignored the hold.
+  view.update(10.3);
+  const spin = view.object3d.getObjectByName('globe-spin')!;
+  const rotAt10 = spin.rotation.z;
+  view.update(200.7);
+  const rotAt200 = spin.rotation.z;
+  expect(rotAt10).toBe(0);
+  expect(rotAt10).toBe(rotAt200);
+});
+
+test('setSeasonalHold(false) (the default) leaves the spin advancing with day, as today', () => {
+  const view = createGlobeView(markerTiles([]), spinningSys());
+  // dayLengthDays is 1 for spinningSys(), so integer days all land on the
+  // same phase — use fractional days so the sweep is actually observed.
+  view.update(10.3);
+  const spin = view.object3d.getObjectByName('globe-spin')!;
+  const rotAt10 = spin.rotation.z;
+  view.update(200.7);
+  const rotAt200 = spin.rotation.z;
+  expect(rotAt10).not.toBeCloseTo(rotAt200, 3);
 });
 
 test('subsolar longitude is frozen for a tidally locked world', () => {
