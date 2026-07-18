@@ -17,6 +17,7 @@ import { TILE_QUADS, tileGrid } from './cubeSphere';
 import { createOcean } from './ocean';
 import { createWinds } from './winds';
 import { iceFraction } from './ice';
+import { systemSeasonalContext } from '../sim/lockedClimate';
 
 const TAU = Math.PI * 2;
 
@@ -247,7 +248,12 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
   // start on whichever lens is active then, not hardcoded to `natural`.
   let activeLens: Lens = naturalLens;
   let lastDay: number | null = null;
-  const colorAt = (i: number) => activeLens.colorAt(tiles, i, lastDay ?? 0, sys.world.yearPhaseOffset);
+  // Built once from the (fixed, for this view's lifetime) system scene —
+  // routes a locked tiles document's temperature through the librating-
+  // substellar reconstruction (`../sim/lockedClimate`) instead of the
+  // spinning-only `temperatureAt`.
+  const seasonalCtx = systemSeasonalContext(sys);
+  const colorAt = (i: number) => activeLens.colorAt(tiles, i, lastDay ?? 0, seasonalCtx);
 
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
   const faceMeshes: THREE.Mesh[] = [];
@@ -292,7 +298,7 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
       const idx = tileIdxByFace[face]!;
       const buf = new Float32Array(idx.length * 3);
       for (let v = 0; v < idx.length; v++) {
-        const rgb = activeLens.colorAt(tiles, idx[v]!, lastDay ?? 0, sys.world.yearPhaseOffset);
+        const rgb = activeLens.colorAt(tiles, idx[v]!, lastDay ?? 0, seasonalCtx);
         buf[3 * v] = rgb[0] / 255;
         buf[3 * v + 1] = rgb[1] / 255;
         buf[3 * v + 2] = rgb[2] / 255;
@@ -314,7 +320,7 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
       for (let v = 0; v < idx.length; v++) {
         let r: number, g: number, b: number;
         if (activeLens.dependsOnDay) {
-          const rgb = activeLens.colorAt(tiles, idx[v]!, day, sys.world.yearPhaseOffset);
+          const rgb = activeLens.colorAt(tiles, idx[v]!, day, seasonalCtx);
           r = rgb[0] / 255;
           g = rgb[1] / 255;
           b = rgb[2] / 255;
@@ -324,7 +330,7 @@ export function createGlobeView(tiles: TilesScene, sys: SystemScene): GlobeView 
           b = base[3 * v + 2]!;
         }
         if (icy) {
-          const frac = iceFraction(tiles, idx[v]!, day, sys.world.yearPhaseOffset);
+          const frac = iceFraction(tiles, idx[v]!, day, seasonalCtx);
           r += (ICE_COLOR[0] - r) * frac;
           g += (ICE_COLOR[1] - g) * frac;
           b += (ICE_COLOR[2] - b) * frac;

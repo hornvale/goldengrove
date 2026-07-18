@@ -12,8 +12,15 @@ import type { TilesScene } from '../sim/scene';
 import { elevationColor } from '../sim/palette';
 import { biomeColorForName } from './biomePalette';
 import { HEX, sequential, diverging } from './colormap';
-import { temperatureAt } from '../sim/climate';
+import type { SeasonalContext } from '../sim/lockedClimate';
+import { seasonalTemperatureAt } from '../sim/lockedClimate';
 import { PLATE_BOUNDARY, PLATE_SLOTS, colorPlates, isBoundaryTile } from './plateColoring';
+
+/** Default seasonal context for callers with no system scene in hand
+ * (legend previews, tests) — a spinning-equivalent no-op (`temperatureAt`
+ * ignores `obliquityDeg`/`insolation` entirely; only a locked tiles document
+ * would read them, and none of those callers pass one). */
+const NO_SYSTEM_CONTEXT: SeasonalContext = { yearPhaseOffset: 0, obliquityDeg: 0, insolation: 1 };
 
 /** 0-255 RGB, matching `elevationColor`'s existing return shape. */
 export type RGB = [number, number, number];
@@ -35,11 +42,12 @@ export interface Lens {
   /** Whether `colorAt` varies with `day`. Static lenses bake once at geometry
    * build; only a living lens pays the per-day recolor. */
   dependsOnDay: boolean;
-  /** This lens's color for tile `i` on absolute standard `day`.
-   * `yearPhaseOffset` (`sys.world.yearPhaseOffset`) is optional — only the
-   * temperature lens reads it; every other lens ignores it, and a caller
-   * with no system scene in hand may omit it (treated as 0). */
-  colorAt(tiles: TilesScene, i: number, day: number, yearPhaseOffset?: number): RGB;
+  /** This lens's color for tile `i` on absolute standard `day`. `ctx`
+   * (`systemSeasonalContext(sys)`, ../sim/lockedClimate) is optional — only
+   * the temperature lens reads it; every other lens ignores it, and a caller
+   * with no system scene in hand may omit it (treated as `NO_SYSTEM_
+   * CONTEXT`). */
+  colorAt(tiles: TilesScene, i: number, day: number, ctx?: SeasonalContext): RGB;
   /** The legend rows to draw for this lens. */
   legend(tiles: TilesScene): LegendEntry[];
 }
@@ -116,8 +124,8 @@ export const temperatureLens: Lens = {
   label: 'temperature',
   caption: `surface temperature on the shown day, diverging about freezing and clamped at ±${TEMP_EXTENT} °C; the seasonal curve is the producer’s own evaluator, not a client invention.`,
   dependsOnDay: true,
-  colorAt: (tiles, i, day, yearPhaseOffset = 0) =>
-    diverging(TEMP_COLD, TEMP_MID, TEMP_HOT, temperatureAt(tiles, i, day, yearPhaseOffset), TEMP_EXTENT),
+  colorAt: (tiles, i, day, ctx = NO_SYSTEM_CONTEXT) =>
+    diverging(TEMP_COLD, TEMP_MID, TEMP_HOT, seasonalTemperatureAt(tiles, i, day, ctx), TEMP_EXTENT),
   legend: () => [
     { swatch: TEMP_COLD, label: `≤ −${TEMP_EXTENT} °C` },
     { swatch: TEMP_MID, label: '0 °C' },
