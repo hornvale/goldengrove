@@ -127,17 +127,16 @@ export function seasonalTemperatureAt(tiles: TilesScene, i: number, day: number,
 
 /** The temperature lens' per-tile evaluator (`../views/lens.ts`):
  * `seasonalTemperatureAt`'s mean+seasonal baseline plus the diurnal (day/
- * night) pulse — `tDiurnalAmpC[i] * diurnalWaveform(lat_i, obliquityDeg,
- * yearPhase, dayFraction, dayLengthStd)` — for spinning worlds only.
- * Mirrors the producer's `RotationRegime::Spinning` branch of
+ * night) pulse — `tDiurnalAmpC[i] * diurnalWaveform(lat_i, lon_i,
+ * obliquityDeg, yearPhase, dayFraction, dayLengthStd)` — for spinning worlds
+ * only. Mirrors the producer's `RotationRegime::Spinning` branch of
  * `temperature_at` (`domains/climate/src/temperature.rs`), which computes
  * `year_phase` and `day_fraction` from the same absolute `day` the seasonal
- * term uses (no per-tile longitude term — the producer's diurnal model is a
- * planet-synchronized pulse, gated per tile only by latitude/declination).
- * Locked worlds, any world with no day length, and any world with a
- * non-positive season length (`season_period_days`, guarding the
- * `yearPhase` division below) get no diurnal term at all — the producer's
- * `Locked` branch never reads `diurnal_amp`. Extracted
+ * term uses, phased per tile by its longitude (local solar time, not a
+ * planet-synchronized pulse). Locked worlds, any world with no day length,
+ * and any world with a non-positive season length (`season_period_days`,
+ * guarding the `yearPhase` division below) get no diurnal term at all — the
+ * producer's `Locked` branch never reads `diurnal_amp`. Extracted
  * as its own pure function so the lens' afternoon-hotter-than-dawn behavior
  * is unit-testable without WebGL. */
 export function lensTemperatureAt(tiles: TilesScene, i: number, day: number, ctx: SeasonalContext): number {
@@ -146,8 +145,10 @@ export function lensTemperatureAt(tiles: TilesScene, i: number, day: number, ctx
   const seasonDay = ctx.seasonDayOverride ?? day;
   const yearPhase = frac(seasonDay / tiles.season_period_days + ctx.yearPhaseOffset);
   const dayFraction = frac(day);
-  const { lat } = tileLatLon(tiles.width, tiles.height, i);
-  return base + tiles.tDiurnalAmpC[i]! * diurnalWaveform(lat, ctx.obliquityDeg, yearPhase, dayFraction, ctx.dayLengthStd);
+  const { lat, lon } = tileLatLon(tiles.width, tiles.height, i);
+  return (
+    base + tiles.tDiurnalAmpC[i]! * diurnalWaveform(lat, lon, ctx.obliquityDeg, yearPhase, dayFraction, ctx.dayLengthStd)
+  );
 }
 
 /** Derives `SeasonalContext` from a parsed `scene/system/v1` document — the

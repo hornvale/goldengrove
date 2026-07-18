@@ -83,7 +83,9 @@ test("seasonalTemperatureAt routes a spinning tiles document to temperatureAt", 
  * `tileLatLon`'s row 0 of a height-1 grid lands at `90 - 0.5/1*180 == 0`),
  * flat mean/no seasonal swing so only the diurnal term (Task 6) can move the
  * result — isolates `lensTemperatureAt`'s new behavior from the pre-existing
- * seasonal sinusoid. */
+ * seasonal sinusoid. Tile 0 (of a width-4, height-1 grid) sits at longitude
+ * `(0+0.5)/4*360-180 == -135`, so its local solar time is the planet-wide
+ * `dayFraction` shifted by `-135/360 == -0.375` (see `tileLatLon`). */
 function dryEquatorialTile(): TilesScene {
   return {
     locked: false,
@@ -96,13 +98,17 @@ function dryEquatorialTile(): TilesScene {
   } as unknown as TilesScene;
 }
 
-test("lensTemperatureAt: the afternoon (day_fraction 0.60) is warmer than pre-dawn (0.05) at a dry tile", () => {
+test("lensTemperatureAt: the local afternoon is warmer than local pre-dawn at a dry tile", () => {
   const tiles = dryEquatorialTile();
   const ctx = { yearPhaseOffset: 0.2, obliquityDeg: 21, insolation: 1, dayLengthStd: 1 };
-  // Same integer day (100) so the seasonal term is identical either way —
-  // only day_fraction (the diurnal pulse) differs between the two calls.
-  const afternoon = lensTemperatureAt(tiles, 0, 100.6, ctx);
-  const preDawn = lensTemperatureAt(tiles, 0, 100.05, ctx);
+  // Tile 0 is at longitude -135 (lon/360 == -0.375), so its local solar time
+  // is `frac(dayFraction - 0.375)`. Pick day_fraction so tile 0's LOCAL solar
+  // time lands exactly at PEAK_FRAC (0.6, local afternoon) for one call and
+  // near local pre-dawn (0.05) for the other — same integer day (100) so the
+  // seasonal term (which is flat here anyway: t_swing_c is all zero) is
+  // identical either way; only the diurnal pulse differs.
+  const afternoon = lensTemperatureAt(tiles, 0, 100.975, ctx); // local solar time = frac(0.975 - 0.375) = 0.6
+  const preDawn = lensTemperatureAt(tiles, 0, 100.425, ctx); // local solar time = frac(0.425 - 0.375) = 0.05
   expect(afternoon).toBeGreaterThan(preDawn);
 });
 
@@ -133,10 +139,14 @@ test("lensTemperatureAt: seasonDayOverride pins the season while the diurnal pul
   tiles.t_swing_c = [9, 9, 9, 9]; // give the season a real signal to hold still against
   const ctx = { yearPhaseOffset: 0.2, obliquityDeg: 21, insolation: 1, dayLengthStd: 1, seasonDayOverride: 100.6 };
   // Same day_fraction (.6), far-apart integer days — the season term must
-  // read `seasonDayOverride` (100.6) both times, not the live `day`.
+  // read `seasonDayOverride` (100.6) both times, not the live `day`. Tile 0
+  // sits at a nonzero longitude (-135), so its local solar time is off the
+  // waveform's flat-derivative peak — comparing floats derived from very
+  // different day magnitudes (100.6 vs 400.6) is only equal to floating-point
+  // tolerance, not bit-for-bit.
   const a = lensTemperatureAt(tiles, 0, 100.6, ctx);
   const b = lensTemperatureAt(tiles, 0, 400.6, ctx);
-  expect(a).toBe(b);
+  expect(Math.abs(a - b)).toBeLessThan(1e-9);
   // Without the override, the same pair differs (the season actually moved).
   const free = { ...ctx, seasonDayOverride: undefined };
   const c = lensTemperatureAt(tiles, 0, 100.6, free);

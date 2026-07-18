@@ -33,6 +33,7 @@ test("diurnalWaveform reproduces the Rust producer's spinning-world golden (seed
   for (const row of rows) {
     const d = diurnalWaveform(
       row.lat_deg,
+      row.lon_deg,
       SEED42.obliquityDeg,
       SEED42.yearPhase,
       row.day_fraction,
@@ -44,22 +45,26 @@ test("diurnalWaveform reproduces the Rust producer's spinning-world golden (seed
 });
 
 // Mirrors `waveform_is_zero_mean_over_a_rotation` (domains/climate/src/diurnal.rs).
+// A fixed nonzero longitude (40.0) is used throughout: per-cell, sweeping
+// `dayFraction` over `[0,1)` still sweeps all local solar times (just
+// phase-shifted), so the integral is still zero regardless of longitude.
 test("diurnalWaveform is zero-mean over a rotation", () => {
   const n = 1000;
   let sum = 0;
   for (let i = 0; i < n; i++) {
-    sum += diurnalWaveform(23.4, 23.4, 0.25, i / n, 1.0);
+    sum += diurnalWaveform(23.4, 40.0, 23.4, 0.25, i / n, 1.0);
   }
   expect(Math.abs(sum / n)).toBeLessThan(1e-3);
 });
 
-// Mirrors `peak_is_in_the_afternoon` (domains/climate/src/diurnal.rs).
+// Mirrors `peak_is_in_the_afternoon` (domains/climate/src/diurnal.rs). At
+// longitude 0, local solar time == dayFraction.
 test("diurnalWaveform peaks in the local afternoon", () => {
   let bestFrac = 0;
   let best = -Infinity;
   for (let i = 0; i < 1000; i++) {
     const f = i / 1000;
-    const d = diurnalWaveform(0.0, 0.0, 0.0, f, 1.0);
+    const d = diurnalWaveform(0.0, 0.0, 0.0, 0.0, f, 1.0);
     if (d > best) {
       best = d;
       bestFrac = f;

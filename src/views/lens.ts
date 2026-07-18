@@ -122,7 +122,7 @@ export const topographicLens: Lens = {
 export const temperatureLens: Lens = {
   id: 'temperature',
   label: 'temperature',
-  caption: `surface temperature on the shown day, diverging about freezing and clamped at ±${TEMP_EXTENT} °C; the seasonal curve is the producer’s own evaluator, not a client invention. Spinning worlds also carry a diurnal (day/night) pulse — a planet-synchronized swing, gated by latitude, not a per-longitude local time.`,
+  caption: `surface temperature on the shown day, diverging about freezing and clamped at ±${TEMP_EXTENT} °C; the seasonal curve is the producer’s own evaluator, not a client invention. Spinning worlds also carry a diurnal (day/night) pulse that follows local solar time (per longitude): the day side warms into local afternoon, the night side cools toward dawn, and the warm band sweeps as the world turns.`,
   dependsOnDay: true,
   colorAt: (tiles, i, day, ctx = NO_SYSTEM_CONTEXT) =>
     diverging(TEMP_COLD, TEMP_MID, TEMP_HOT, lensTemperatureAt(tiles, i, day, ctx), TEMP_EXTENT),

@@ -4,335 +4,335 @@
     "lon_deg": -70.3125,
     "day_fraction": 0.0,
     "amplitude_c": 16.47706809376818,
-    "diurnal_c": -8.056197094971555
+    "diurnal_c": 2.7969662327607536
   },
   {
     "lat_deg": -42.1875,
     "lon_deg": -70.3125,
     "day_fraction": 0.15,
     "amplitude_c": 16.47706809376818,
-    "diurnal_c": -9.470627683971488
+    "diurnal_c": -6.087871621282539
   },
   {
     "lat_deg": -42.1875,
     "lon_deg": -70.3125,
     "day_fraction": 0.3,
     "amplitude_c": 16.47706809376818,
-    "diurnal_c": -3.0771934702109687
+    "diurnal_c": -9.953688546440244
   },
   {
     "lat_deg": -42.1875,
     "lon_deg": -70.3125,
     "day_fraction": 0.45,
     "amplitude_c": 16.47706809376818,
-    "diurnal_c": 5.853169803490081
+    "diurnal_c": -5.613391045737617
   },
   {
     "lat_deg": -42.1875,
     "lon_deg": -70.3125,
     "day_fraction": 0.6,
     "amplitude_c": 16.47706809376818,
-    "diurnal_c": 9.958007249521172
+    "diurnal_c": 3.3547516023698516
   },
   {
     "lat_deg": -42.1875,
     "lon_deg": -70.3125,
     "day_fraction": 0.75,
     "amplitude_c": 16.47706809376818,
-    "diurnal_c": 5.853169803490077
+    "diurnal_c": 9.557138079692702
   },
   {
     "lat_deg": -36.5625,
     "lon_deg": -59.0625,
     "day_fraction": 0.0,
     "amplitude_c": 13.675742898544552,
-    "diurnal_c": -7.267983392237522
+    "diurnal_c": 0.7927448840913681
   },
   {
     "lat_deg": -36.5625,
     "lon_deg": -59.0625,
     "day_fraction": 0.15,
     "amplitude_c": 13.675742898544552,
-    "diurnal_c": -8.54402690372767
+    "diurnal_c": -6.7736674789979014
   },
   {
     "lat_deg": -36.5625,
     "lon_deg": -59.0625,
     "day_fraction": 0.3,
     "amplitude_c": 13.675742898544552,
-    "diurnal_c": -2.7761226261649736
+    "diurnal_c": -8.755668580267571
   },
   {
     "lat_deg": -36.5625,
     "lon_deg": -59.0625,
     "day_fraction": 0.45,
     "amplitude_c": 13.675742898544552,
-    "diurnal_c": 5.280499027297229
+    "diurnal_c": -3.5192382518858065
   },
   {
     "lat_deg": -36.5625,
     "lon_deg": -59.0625,
     "day_fraction": 0.6,
     "amplitude_c": 13.675742898544552,
-    "diurnal_c": 8.983721532145093
+    "diurnal_c": 4.618555892743527
   },
   {
     "lat_deg": -36.5625,
     "lon_deg": -59.0625,
     "day_fraction": 0.75,
     "amplitude_c": 13.675742898544552,
-    "diurnal_c": 5.280499027297226
+    "diurnal_c": 8.948676333172095
   },
   {
     "lat_deg": 30.9375,
     "lon_deg": -8.4375,
     "day_fraction": 0.0,
     "amplitude_c": 12.57364288147164,
-    "diurnal_c": -7.292798649583154
+    "diurnal_c": -6.436409534850428
   },
   {
     "lat_deg": 30.9375,
     "lon_deg": -8.4375,
     "day_fraction": 0.15,
     "amplitude_c": 12.57364288147164,
-    "diurnal_c": -8.573198988326881
+    "diurnal_c": -8.889139641844848
   },
   {
     "lat_deg": 30.9375,
     "lon_deg": -8.4375,
     "day_fraction": 0.3,
     "amplitude_c": 12.57364288147164,
-    "diurnal_c": -2.7856012110314294
+    "diurnal_c": -4.013400839239168
   },
   {
     "lat_deg": 30.9375,
     "lon_deg": -8.4375,
     "day_fraction": 0.45,
     "amplitude_c": 12.57364288147164,
-    "diurnal_c": 5.298528367102228
+    "diurnal_c": 4.171103992158815
   },
   {
     "lat_deg": 30.9375,
     "lon_deg": -8.4375,
     "day_fraction": 0.6,
     "amplitude_c": 12.57364288147164,
-    "diurnal_c": 9.014394877103445
+    "diurnal_c": 8.916827663977587
   },
   {
     "lat_deg": 30.9375,
     "lon_deg": -8.4375,
     "day_fraction": 0.75,
     "amplitude_c": 12.57364288147164,
-    "diurnal_c": 5.298528367102225
+    "diurnal_c": 6.311255604080327
   },
   {
     "lat_deg": 19.6875,
     "lon_deg": 59.0625,
     "day_fraction": 0.0,
     "amplitude_c": 10.50975223952694,
-    "diurnal_c": -6.665450270468583
+    "diurnal_c": -7.58047699704805
   },
   {
     "lat_deg": 19.6875,
     "lon_deg": 59.0625,
     "day_fraction": 0.15,
     "amplitude_c": 10.50975223952694,
-    "diurnal_c": -7.835706737740618
+    "diurnal_c": -1.8446023501719917
   },
   {
     "lat_deg": 19.6875,
     "lon_deg": 59.0625,
     "day_fraction": 0.3,
     "amplitude_c": 10.50975223952694,
-    "diurnal_c": -2.5459754529968186
+    "diurnal_c": 5.412016881497783
   },
   {
     "lat_deg": 19.6875,
     "lon_deg": 59.0625,
     "day_fraction": 0.45,
     "amplitude_c": 10.50975223952694,
-    "diurnal_c": 4.842733089800263
+    "diurnal_c": 8.20680976637659
   },
   {
     "lat_deg": 19.6875,
     "lon_deg": 59.0625,
     "day_fraction": 0.6,
     "amplitude_c": 10.50975223952694,
-    "diurnal_c": 8.238949634943529
+    "diurnal_c": 4.23566661659421
   },
   {
     "lat_deg": 19.6875,
     "lon_deg": 59.0625,
     "day_fraction": 0.75,
     "amplitude_c": 10.50975223952694,
-    "diurnal_c": 4.8427330898002605
+    "diurnal_c": -3.2274850246533213
   },
   {
     "lat_deg": 25.3125,
     "lon_deg": 81.5625,
     "day_fraction": 0.0,
     "amplitude_c": 8.747459306493395,
-    "diurnal_c": -5.336377331103358
+    "diurnal_c": -4.618150446034643
   },
   {
     "lat_deg": 25.3125,
     "lon_deg": 81.5625,
     "day_fraction": 0.15,
     "amplitude_c": 8.747459306493395,
-    "diurnal_c": -6.2732877917808425
+    "diurnal_c": 1.0957705900705954
   },
   {
     "lat_deg": 25.3125,
     "lon_deg": 81.5625,
     "day_fraction": 0.3,
     "amplitude_c": 8.747459306493395,
-    "diurnal_c": -2.0383147636870307
+    "diurnal_c": 5.906306031513276
   },
   {
     "lat_deg": 25.3125,
     "lon_deg": 81.5625,
     "day_fraction": 0.45,
     "amplitude_c": 8.747459306493395,
-    "diurnal_c": 3.877105076530336
+    "diurnal_c": 5.84750857162858
   },
   {
     "lat_deg": 25.3125,
     "lon_deg": 81.5625,
     "day_fraction": 0.6,
     "amplitude_c": 8.747459306493395,
-    "diurnal_c": 6.596125134832653
+    "diurnal_c": 0.9678525706009322
   },
   {
     "lat_deg": 25.3125,
     "lon_deg": 81.5625,
     "day_fraction": 0.75,
     "amplitude_c": 8.747459306493395,
-    "diurnal_c": 3.8771050765303334
+    "diurnal_c": -4.709729636843404
   },
   {
     "lat_deg": 14.0625,
     "lon_deg": -120.9375,
     "day_fraction": 0.0,
     "amplitude_c": 8.091043194828503,
-    "diurnal_c": -5.2775835777396525
+    "diurnal_c": 6.002085273714225
   },
   {
     "lat_deg": 14.0625,
     "lon_deg": -120.9375,
     "day_fraction": 0.15,
     "amplitude_c": 8.091043194828503,
-    "diurnal_c": -6.204171589472627
+    "diurnal_c": 1.4605229467931051
   },
   {
     "lat_deg": 14.0625,
     "lon_deg": -120.9375,
     "day_fraction": 0.3,
     "amplitude_c": 8.091043194828503,
-    "diurnal_c": -2.0158575482282735
+    "diurnal_c": -4.285137576194762
   },
   {
     "lat_deg": 14.0625,
     "lon_deg": -120.9375,
     "day_fraction": 0.45,
     "amplitude_c": 8.091043194828503,
-    "diurnal_c": 3.8343889143305456
+    "diurnal_c": -6.498004289456295
   },
   {
     "lat_deg": 14.0625,
     "lon_deg": -120.9375,
     "day_fraction": 0.6,
     "amplitude_c": 8.091043194828503,
-    "diurnal_c": 6.523452059022755
+    "diurnal_c": -3.3537246051565206
   },
   {
     "lat_deg": 14.0625,
     "lon_deg": -120.9375,
     "day_fraction": 0.75,
     "amplitude_c": 8.091043194828503,
-    "diurnal_c": 3.8343889143305434
+    "diurnal_c": 2.5554645631334942
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": 75.9375,
     "day_fraction": 0.0,
     "amplitude_c": 7.645028332174934,
-    "diurnal_c": -0.33408268109815203
+    "diurnal_c": -0.3166265733132799
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": 75.9375,
     "day_fraction": 0.15,
     "amplitude_c": 7.645028332174934,
-    "diurnal_c": -0.3927377459916462
+    "diurnal_c": 0.028356482241955902
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": 75.9375,
     "day_fraction": 0.3,
     "amplitude_c": 7.645028332174934,
-    "diurnal_c": -0.12760822912680198
+    "diurnal_c": 0.3499616174507099
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": 75.9375,
     "day_fraction": 0.45,
     "amplitude_c": 7.645028332174934,
-    "diurnal_c": 0.24272527568786026
+    "diurnal_c": 0.3830480729699392
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": 75.9375,
     "day_fraction": 0.6,
     "amplitude_c": 7.645028332174934,
-    "diurnal_c": 0.41294890394269995
+    "diurnal_c": 0.10033839897085292
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": 75.9375,
     "day_fraction": 0.75,
     "amplitude_c": 7.645028332174934,
-    "diurnal_c": 0.2427252756878601
+    "diurnal_c": -0.265093210662528
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": -177.1875,
     "day_fraction": 0.0,
     "amplitude_c": 0.7050000000000003,
-    "diurnal_c": -0.030808033658024633
+    "diurnal_c": 0.03186922279636338
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": -177.1875,
     "day_fraction": 0.15,
     "amplitude_c": 0.7050000000000003,
-    "diurnal_c": -0.036217015672634016
+    "diurnal_c": 0.035595980860442515
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": -177.1875,
     "day_fraction": 0.3,
     "amplitude_c": 0.7050000000000003,
-    "diurnal_c": -0.01176762173081465
+    "diurnal_c": 0.009976362384943108
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": -177.1875,
     "day_fraction": 0.45,
     "amplitude_c": 0.7050000000000003,
-    "diurnal_c": 0.02238334665677547
+    "diurnal_c": -0.023868063497652647
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": -177.1875,
     "day_fraction": 0.6,
     "amplitude_c": 0.7050000000000003,
-    "diurnal_c": 0.03808082385441995
+    "diurnal_c": -0.038034953834344194
   },
   {
     "lat_deg": 87.1875,
     "lon_deg": -177.1875,
     "day_fraction": 0.75,
     "amplitude_c": 0.7050000000000003,
-    "diurnal_c": 0.022383346656775455
+    "diurnal_c": -0.020844706373252468
   }
 ]
