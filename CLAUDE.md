@@ -116,9 +116,19 @@ Mixed-level boundaries are crack-filled by **skirts** — `buildTileGeometry`'s
 when neighbours match. The whole geometry pipeline is keyed by tile slot, so a
 rebuild at any mix of levels is mechanical.
 
-**Still open (unblocked, client-side):** deeper levels currently *interpolate*
-the 512-wide tile data (smoother silhouette, no new detail). For TRUE higher-res
-terrain, consume the producer's `scene/tiles-region/v1` patches (`regionPatch.ts`
-parses them; the producer emits them) in the near tiles. Also: a rebuild
-throttle if an unfrozen diurnal spin while zoomed-in ever churns rebuilds (the
-freeze-spin toggle is the current answer).
+**Region patches (true detail).** Near tiles at level ≥ `REGION_MIN_LEVEL`
+render from the producer's `scene/tiles-region/v1` patch (terrain re-sampled at
+the tile's own grid, not interpolated from the 512-wide export). The globe
+requests a tile's region async through `main`'s worker bridge (`requestRegion`
+→ `{type:'region'}` message → the persisted post-genesis catalog serves it →
+`globe.onRegion` caches it → the next reselect rebuilds that tile). Region tiles
+mesh through the same `buildGridGeometry`/skirt core as base tiles, and colour
+through the lens via a per-tile colour SOURCE (`RegionScene` carries the fields
+`colorAt`/`iceFraction` read). Gated to spinning worlds (the locked-temperature
+lens needs `width`/`height` a patch lacks).
+
+**Still open (unblocked, client-side):** CDLOD levels past a region's own
+`samples` (requested at `TILE_QUADS`) re-interpolate — raising the requested
+`samples` for the deepest tiles is the future knob. Also a rebuild throttle if
+an unfrozen diurnal spin while zoomed-in ever churns rebuilds (freeze-spin is
+the current answer).
