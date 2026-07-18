@@ -41,6 +41,11 @@ export const MARKER_CLEARANCE = 0.006;
  * units — far enough to read as parallel light across the whole sphere. */
 const LIGHT_DISTANCE = GLOBE_RADIUS * 20;
 
+/** Ambient intensity of the night-side fill when enabled — bright enough to
+ * read the unlit hemisphere, low enough that the daylit side (directional
+ * 2.2 on top) still reads as the day side. */
+const NIGHT_FILL_INTENSITY = 0.9;
+
 /** Ice-white blend target (0-1 RGB, matching the geometry `color` attribute's
  * scale) — the near-white a frozen tile's biome/ocean color blends toward as
  * `iceFraction` rises. Blended into the *base* vertex color before the
@@ -243,6 +248,15 @@ export interface GlobeView {
   /** Show or hide the prevailing-wind overlay — a no-op on a tidally locked
    * world, where `createWinds` built nothing to show. */
   setWinds(on: boolean): void;
+  /** Show or hide the ocean's drifting wave pattern (the normal map). Off
+   * leaves a smooth, still sea; the depth grading stays. */
+  setWaves(on: boolean): void;
+  /** Turn the ocean's sun-glint (specular highlight) on or off. Independent
+   * of the waves toggle. */
+  setGlint(on: boolean): void;
+  /** Fill the night side with ambient light (on) so the unlit hemisphere is
+   * readable, or leave the honest dark terminator (off, the default). */
+  setNightFill(on: boolean): void;
   /** Toggle the seasonal hold (Task 9): freezes the mesh's diurnal spin
    * (`spinGroup.rotation.z`, via `seasonalSpinZ`) while the terminator light
    * keeps tracking the sub-solar latitude, so a year's seasons are watchable
@@ -414,6 +428,12 @@ export function createGlobeView(
   function setWinds(on: boolean): void {
     winds?.setVisible(on);
   }
+  function setWaves(on: boolean): void {
+    ocean.setWaves(on);
+  }
+  function setGlint(on: boolean): void {
+    ocean.setGlint(on);
+  }
   // True-relief geometry (1x, honest) is expensive to build and most
   // sessions never ask for it — construct lazily on first toggle, not here.
   let trueGeoms: THREE.BufferGeometry[] | null = null;
@@ -450,13 +470,22 @@ export function createGlobeView(
   spinGroup.add(eclipseGroup);
   const bandMeshes: (THREE.Mesh | null)[] = eclipses.map(() => null);
 
-  // No ambient light here: the night side is meant to fall to shader
-  // darkness (spec §4½) — the system view's ambient wash belongs to that
-  // view's always-lit spheres, not this one's honest terminator.
+  // The honest day/night terminator (spec §4½): a single directional sun,
+  // no ambient, so the night side falls to shader darkness by default.
   const light = new THREE.DirectionalLight(0xfff4e0, 2.2);
   light.target.position.set(0, 0, 0);
   root.add(light);
   root.add(light.target);
+  // An optional night-side fill: off (intensity 0) by default, so the honest
+  // terminator is unchanged. Turned up, it lifts the unlit hemisphere out of
+  // black so the far side's terrain and lens colors (temperature especially)
+  // stay readable through the night — the daylit side keeps the directional
+  // gradient on top, so which side faces the sun still reads.
+  const nightFill = new THREE.AmbientLight(0xffffff, 0);
+  root.add(nightFill);
+  function setNightFill(on: boolean): void {
+    nightFill.intensity = on ? NIGHT_FILL_INTENSITY : 0;
+  }
 
   let selectedGroup: string | null = null;
   function setSelected(featureName: string | null): void {
@@ -513,7 +542,18 @@ export function createGlobeView(
 
   update(0);
 
-  return { object3d: root, update, setTrueRelief, setSelected, setLens, setWinds, setSeasonalHold };
+  return {
+    object3d: root,
+    update,
+    setTrueRelief,
+    setSelected,
+    setLens,
+    setWinds,
+    setWaves,
+    setGlint,
+    setNightFill,
+    setSeasonalHold,
+  };
 }
 
 /** The tile index vertex `v` of face `face`'s level-0 geometry maps to — the

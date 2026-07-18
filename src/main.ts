@@ -9,6 +9,7 @@
 // rerolled), which deliberately reloads the page: genesis is a fresh boot.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 import './styles.css';
 import { buildHud, type HudCallbacks } from './ui/hud';
 import { mountInfoCard } from './ui/infoCard';
@@ -195,8 +196,14 @@ function mountViews(
   systemControls.enableDamping = true;
   systemControls.minDistance = WORLD_CLOSE_DISTANCE;
   systemControls.maxDistance = systemReach * 2;
-  const globeControls = new OrbitControls(globeCamera, globeCanvas);
-  globeControls.enableDamping = true;
+  // The globe camera is a free arcball: rotate on all three axes (roll
+  // included, unlike OrbitControls' locked up-vector — that lock is why the
+  // lit hemisphere used to require twisting the poles horizontal) plus dolly.
+  // Pan stays off so the world holds the frame's centre (target at the
+  // origin), so orbiting never lets the planet drift out of view. No `scene`
+  // is passed, so the arcball gizmo rings are not drawn — a clean globe.
+  const globeControls = new ArcballControls(globeCamera, globeCanvas);
+  globeControls.enablePan = false;
   globeControls.minDistance = globeReach * 0.38; // just above the 60x relief
   globeControls.maxDistance = globeReach * 2;
 
@@ -217,11 +224,21 @@ function mountViews(
   // The wind overlay is a single globe-wide toggle (not per-rung like
   // true-scale): it starts hidden, matching `createWinds`'s built geometry.
   let windsOn = false;
+  // Ocean-surface effects start on, matching the ocean material defaults; the
+  // HUD reflects that initial state in buildHud.
+  let wavesOn = true;
+  let glintOn = true;
+  // Night-side fill starts off — the default honest dark terminator.
+  let nightFillOn = false;
 
   // Task 9's seasonal hold: a single flag (not per-rung — it tracks the
   // active clock mult, which is shared) reflecting whether the globe's
   // diurnal spin is currently frozen.
   let seasonalHoldOn = false;
+  // The user's spin-freeze override: when set, the globe's daily rotation is
+  // held at ANY speed (not just above SEASONAL_HOLD_MULT), so seasons/ice are
+  // watchable at the middle rates too. Decouples the spin from the clock.
+  let spinFrozenByUser = false;
 
   function setCaptionFor(v: ZoomTarget): void {
     if (v === 'system') {
@@ -236,7 +253,7 @@ function mountViews(
    * active clock mult and refreshes the caption — called wherever the mult
    * changes (boot, rung switch, and a direct speed pick). */
   function applySeasonalHold(mult: number): void {
-    seasonalHoldOn = mult > SEASONAL_HOLD_MULT;
+    seasonalHoldOn = spinFrozenByUser || mult > SEASONAL_HOLD_MULT;
     globeView.setSeasonalHold(seasonalHoldOn);
     setCaptionFor(view);
   }
@@ -288,19 +305,34 @@ function mountViews(
 
   // Wheel-through: wheeling into a rung's dolly limit is a request to cross
   // the altitude ladder rather than just a zoom (src/views/zoom.ts).
-  function maybeHandoff(deltaY: number, controls: OrbitControls): void {
+  // `distance` is passed in rather than read off the controls, so this works
+  // for both control types (OrbitControls has getDistance(); ArcballControls
+  // does not — its distance is the camera-to-target span).
+  function maybeHandoff(
+    deltaY: number,
+    controls: { enabled: boolean; minDistance: number; maxDistance: number },
+    distance: number,
+  ): void {
     // Only a rung at rest may hand off: during the 1.5 s transition the
     // inactive rung's controls are disabled and its camera pose is frozen
     // wherever it was parked — evaluating that stale distance would let a
     // continued scroll whipsaw the transition back mid-flight.
     if (!controls.enabled) return;
-    const intent = wheelHandoff(view, deltaY, controls.getDistance(), controls.minDistance, controls.maxDistance);
+    const intent = wheelHandoff(view, deltaY, distance, controls.minDistance, controls.maxDistance);
     if (intent) {
       toggleView();
     }
   }
-  systemCanvas.addEventListener('wheel', (e) => maybeHandoff(e.deltaY, systemControls), { passive: true });
-  globeCanvas.addEventListener('wheel', (e) => maybeHandoff(e.deltaY, globeControls), { passive: true });
+  systemCanvas.addEventListener(
+    'wheel',
+    (e) => maybeHandoff(e.deltaY, systemControls, systemControls.getDistance()),
+    { passive: true },
+  );
+  globeCanvas.addEventListener(
+    'wheel',
+    (e) => maybeHandoff(e.deltaY, globeControls, globeCamera.position.distanceTo(globeControls.target)),
+    { passive: true },
+  );
 
   const hudRoot = document.createElement('div');
   app.append(hudRoot);
@@ -397,6 +429,13 @@ function mountViews(
       hud.setActiveSpeed(clamped); // corrects the button if the click was over-cap
       applySeasonalHold(clamped);
     },
+    onFreezeSpin() {
+      spinFrozenByUser = !spinFrozenByUser;
+      // Re-evaluate the hold against the current clock rate (daysPerSecond is
+      // the live mult / 86400) so the freeze takes effect immediately.
+      applySeasonalHold(daysPerSecond * 86400);
+      hud.setFreezeSpinActive(spinFrozenByUser);
+    },
     onTrueScale() {
       trueScaleOn[view] = !trueScaleOn[view];
       applyTrueScale();
@@ -445,6 +484,21 @@ function mountViews(
     },
     onEclipseMark(event) {
       infoCard.show(eclipseInfo(event));
+    },
+    onWaves() {
+      wavesOn = !wavesOn;
+      globeView.setWaves(wavesOn);
+      hud.setWavesActive(wavesOn);
+    },
+    onGlint() {
+      glintOn = !glintOn;
+      globeView.setGlint(glintOn);
+      hud.setGlintActive(glintOn);
+    },
+    onNightFill() {
+      nightFillOn = !nightFillOn;
+      globeView.setNightFill(nightFillOn);
+      hud.setNightFillActive(nightFillOn);
     },
   };
 

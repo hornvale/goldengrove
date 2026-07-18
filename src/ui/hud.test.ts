@@ -4,7 +4,7 @@ import { LENSES, moistureLens } from '../views/lens';
 import type { EclipseEvent } from '../sim/scene';
 
 describe('buildHud interactions', () => {
-  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {}, onScrub(_: number) {}, onLens(_: string) {}, onWinds() {}, onEclipseMark(_: EclipseEvent) {} };
+  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {}, onScrub(_: number) {}, onLens(_: string) {}, onWinds() {}, onEclipseMark(_: EclipseEvent) {}, onFreezeSpin() {}, onWaves() {}, onGlint() {}, onNightFill() {} };
 
   it('share button fires onShare and flashes', () => {
     const root = document.createElement('div');
@@ -234,5 +234,59 @@ describe('buildHud interactions', () => {
     expect(btn.classList.contains('active')).toBe(true);
     hud.setWindsActive(false);
     expect(btn.classList.contains('active')).toBe(false);
+  });
+
+  it('freeze-spin toggle fires onFreezeSpin and reflects its active state', () => {
+    const root = document.createElement('div');
+    let calls = 0;
+    const hud = buildHud(root, '42', { ...noop, onFreezeSpin: () => { calls++; } });
+    const btn = root.querySelector('button[name="freeze-spin"]') as HTMLButtonElement;
+    expect(btn.classList.contains('active')).toBe(false); // spins by default
+    btn.click();
+    expect(calls).toBe(1);
+    hud.setFreezeSpinActive(true);
+    expect(btn.classList.contains('active')).toBe(true);
+    hud.setFreezeSpinActive(false);
+    expect(btn.classList.contains('active')).toBe(false);
+  });
+
+  it('ocean toggles fire their callbacks and start active', () => {
+    const root = document.createElement('div');
+    let waves = 0;
+    let glint = 0;
+    buildHud(root, '42', { ...noop, onWaves: () => { waves++; }, onGlint: () => { glint++; } });
+    const wavesBtn = root.querySelector('button[name="waves-toggle"]') as HTMLButtonElement;
+    const glintBtn = root.querySelector('button[name="glint-toggle"]') as HTMLButtonElement;
+    // Both default to on (the ocean material defaults), reflected in the class.
+    expect(wavesBtn.classList.contains('active')).toBe(true);
+    expect(glintBtn.classList.contains('active')).toBe(true);
+    wavesBtn.click();
+    glintBtn.click();
+    expect(waves).toBe(1);
+    expect(glint).toBe(1);
+  });
+
+  it('night-fill toggle fires onNightFill and starts off (dark terminator)', () => {
+    const root = document.createElement('div');
+    let calls = 0;
+    const hud = buildHud(root, '42', { ...noop, onNightFill: () => { calls++; } });
+    const btn = root.querySelector('button[name="night-fill-toggle"]') as HTMLButtonElement;
+    expect(btn.classList.contains('active')).toBe(false); // honest dark night by default
+    btn.click();
+    expect(calls).toBe(1);
+    hud.setNightFillActive(true);
+    expect(btn.classList.contains('active')).toBe(true);
+  });
+
+  it('setWavesActive / setGlintActive toggle their active class independently', () => {
+    const root = document.createElement('div');
+    const hud = buildHud(root, '42', noop);
+    const wavesBtn = root.querySelector('button[name="waves-toggle"]') as HTMLButtonElement;
+    const glintBtn = root.querySelector('button[name="glint-toggle"]') as HTMLButtonElement;
+    hud.setWavesActive(false);
+    expect(wavesBtn.classList.contains('active')).toBe(false);
+    expect(glintBtn.classList.contains('active')).toBe(true); // untouched
+    hud.setGlintActive(false);
+    expect(glintBtn.classList.contains('active')).toBe(false);
   });
 });
