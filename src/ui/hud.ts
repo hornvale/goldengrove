@@ -1,4 +1,6 @@
 import { LENSES, type Lens, type LegendEntry } from '../views/lens';
+import type { EclipseEvent } from '../sim/scene';
+import { eclipseMarkPositions } from './eclipseMarks';
 
 export const SPEED_STEPS: Array<{ label: string; mult: number }> = [
   { label: '1×', mult: 1 },
@@ -27,6 +29,8 @@ export interface HudCallbacks {
    * control is disabled (no circulation bands) — the browser's own
    * `disabled` attribute blocks the click before this callback is reached. */
   onWinds(): void;
+  /** The viewer clicked an eclipse mark on the day scrubber. */
+  onEclipseMark(event: EclipseEvent): void;
 }
 
 export interface Hud {
@@ -51,6 +55,9 @@ export interface Hud {
   setWindsAvailable(available: boolean, reason?: string): void;
   /** Marks the winds toggle's on/off state (only meaningful while available). */
   setWindsActive(on: boolean): void;
+  /** Rebuilds the day scrubber's eclipse marks for the displayed year's
+   * `events`, placed against `maxDay` (the scrubber's own range). */
+  setEclipses(events: EclipseEvent[], maxDay: number): void;
 }
 
 export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud {
@@ -129,7 +136,13 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
     dayLabel.textContent = `day ${day.toFixed(1)}`;
     cb.onScrub(day);
   });
-  scrubberRow.append(scrub, dayLabel);
+  // The eclipse marks overlay MUST be a child of this positioned
+  // scrubberRow (it carries the base `hud` class's `position: absolute`,
+  // which is what makes an absolutely-positioned child land over the track
+  // at all) — a loose element on `root` was invisible AND unclickable
+  // (Task 7's regression, caught only by a later visual pass, not jsdom).
+  const eclipseMarksEl = el('div', 'hud-eclipse-marks');
+  scrubberRow.append(scrub, dayLabel, eclipseMarksEl);
 
   // The lens picker: one button per registered lens (LENSES), generically —
   // no per-lens branch. Adding a future lens costs one file and zero HUD
@@ -203,6 +216,16 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
       windsReason.textContent = available ? '' : (reason ?? '');
     },
     setWindsActive: (on) => { windsToggle.classList.toggle('active', on); },
+    setEclipses: (events, maxDay) => {
+      eclipseMarksEl.replaceChildren();
+      for (const mark of eclipseMarkPositions(events, maxDay)) {
+        const markEl = el('button', `hud-eclipse-mark hud-eclipse-${mark.body} hud-eclipse-${mark.kind}`);
+        markEl.style.left = `${mark.leftFraction * 100}%`;
+        markEl.title = `${mark.body} ${mark.kind} eclipse — day ${mark.event.day.toFixed(1)}`;
+        markEl.addEventListener('click', () => cb.onEclipseMark(mark.event));
+        eclipseMarksEl.appendChild(markEl);
+      }
+    },
   };
   hud.setActiveSpeed(1);
   return hud;

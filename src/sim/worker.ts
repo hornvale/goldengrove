@@ -1,6 +1,6 @@
 // worker.ts — genesis off the main thread (it takes seconds).
 import { CatalogFetchError, loadCatalog } from "./catalog";
-import { parseMoons, parseNeighbors, parseSystem, parseTiles, SceneFormatError } from "./scene";
+import { parseEclipses, parseMoons, parseNeighbors, parseSystem, parseTiles, SceneFormatError } from "./scene";
 
 /** How main.ts distinguishes the three worker failure modes it renders as
  * distinct, styled full-screen states: the catalog binary itself never
@@ -45,7 +45,10 @@ self.onmessage = async (ev: MessageEvent) => {
     const moons = parseMoons(catalog.sceneMoons());
     const neighbors = parseNeighbors(catalog.sceneNeighbors());
     const tiles = parseTiles(catalog.sceneTiles(tilesWidth));
-    self.postMessage({ type: "world", system, moons, neighbors, tiles });
+    // The displayed year's eclipses (day scrubber marks, Task 7): the whole
+    // scrubber range, [0, yearDays) — matches setDayRange's own extent.
+    const eclipses = parseEclipses(catalog.sceneEclipses(0, system.world.yearDays));
+    self.postMessage({ type: "world", system, moons, neighbors, tiles, eclipses });
   } catch (err) {
     self.postMessage({
       type: "error",

@@ -2,7 +2,7 @@
  * plus the already-golden derivations (ephemeris phases, tile sampling) —
  * surfacing the latent numbers behind the pixels, never computing new
  * physics (ORRERY-ephemeris-inspector). */
-import type { Feature, MoonsScene, SystemScene, TilesScene } from '../sim/scene';
+import type { EclipseEvent, Feature, MoonsScene, SystemScene, TilesScene } from '../sim/scene';
 import { moonPhase, synodicDays } from '../sim/ephemeris';
 import { illuminatedFraction } from '../sim/moon';
 import { sampleTile } from '../views/worldMesh';
@@ -119,6 +119,17 @@ export function starInfo(sys: SystemScene): InfoCard {
       `luminosity ×${sys.star.luminosityRel.toFixed(3)} (relative)`,
       `habitable zone ${sys.star.hzInnerAu.toFixed(2)}–${sys.star.hzOuterAu.toFixed(2)} AU`,
     ],
+  };
+}
+
+/** A dated eclipse (`scene/eclipses/v1`): body, kind, the moon involved, and
+ * the day it lands — the day scrubber's mark opens this card
+ * (`eclipseMarkPositions`, ./eclipseMarks.ts, carries the click through). */
+export function eclipseInfo(event: EclipseEvent): InfoCard {
+  return {
+    title: `${event.body} eclipse`,
+    kindLine: `${event.kind} · moon ${event.moonIndex}`,
+    lines: [`day ${event.day.toFixed(1)}`],
   };
 }
 

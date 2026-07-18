@@ -12,7 +12,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './styles.css';
 import { buildHud, type HudCallbacks } from './ui/hud';
 import { mountInfoCard } from './ui/infoCard';
-import { moonInfo, namedTarget, siteInfo, starInfo, worldInfo } from './ui/inspect';
+import { eclipseInfo, moonInfo, namedTarget, siteInfo, starInfo, worldInfo } from './ui/inspect';
 import { clockToDay } from './time/clock';
 import { dayToRawDate, formatRawDate, rawDateToDay } from './time/calendar';
 import { createSystemView } from './views/system';
@@ -20,7 +20,7 @@ import { createGlobeView, RELIEF_EXAGGERATION } from './views/globe';
 import { lensById, naturalLens } from './views/lens';
 import { ZoomController, dollyLookAt, dollyPosition, wheelHandoff, type ZoomTarget } from './views/zoom';
 import { SPEED_POLICY, SpeedMemory, clampMult } from './time/speedPolicy';
-import type { MoonsScene, NeighborsScene, SystemScene, TilesScene } from './sim/scene';
+import type { EclipsesScene, MoonsScene, NeighborsScene, SystemScene, TilesScene } from './sim/scene';
 import { defaultAppState, parseAppState, seedError, serializeAppState, type AppState } from './state/url';
 import { randomSeed } from './ui/seed';
 import type { WorkerErrorKind } from './sim/worker';
@@ -114,7 +114,7 @@ function boot(): void {
   worker.onmessage = (ev: MessageEvent) => {
     const msg = ev.data;
     if (msg.type === 'world') {
-      mountViews(msg.system, msg.moons, msg.neighbors, msg.tiles, state);
+      mountViews(msg.system, msg.moons, msg.neighbors, msg.tiles, msg.eclipses, state);
     } else if (msg.type === 'error') {
       const kind = msg.kind as WorkerErrorKind;
       renderError(kind, titleFor(kind), msg.message, state.seed);
@@ -129,6 +129,7 @@ function mountViews(
   moons: MoonsScene,
   neighbors: NeighborsScene,
   tiles: TilesScene,
+  eclipses: EclipsesScene,
   state: AppState,
 ): void {
   app.innerHTML = '';
@@ -442,6 +443,9 @@ function mountViews(
       globeView.setWinds(windsOn);
       hud.setWindsActive(windsOn);
     },
+    onEclipseMark(event) {
+      infoCard.show(eclipseInfo(event));
+    },
   };
 
   /** Repaints the calendar text for the current `day`. Every discrete day
@@ -470,6 +474,7 @@ function mountViews(
     tiles.circulationBands !== null,
     'no circulation bands: this world is tidally locked',
   );
+  hud.setEclipses(eclipses.events, system.world.yearDays);
 
   const infoCard = mountInfoCard(app);
   const raycaster = new THREE.Raycaster();

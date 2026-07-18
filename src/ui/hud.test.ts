@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildHud, SPEED_STEPS } from './hud';
 import { LENSES, moistureLens } from '../views/lens';
+import type { EclipseEvent } from '../sim/scene';
 
 describe('buildHud interactions', () => {
-  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {}, onScrub(_: number) {}, onLens(_: string) {}, onWinds() {} };
+  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {}, onScrub(_: number) {}, onLens(_: string) {}, onWinds() {}, onEclipseMark(_: EclipseEvent) {} };
 
   it('share button fires onShare and flashes', () => {
     const root = document.createElement('div');
@@ -180,6 +181,49 @@ describe('buildHud interactions', () => {
     expect(root.textContent).toContain('no circulation bands: this world is tidally locked');
     btn.click(); // a disabled button does not dispatch a click handler at all
     expect(calls).toBe(0);
+  });
+
+  it('setEclipses builds one mark per surviving event, inside the positioned scrubberRow', () => {
+    const root = document.createElement('div');
+    const hud = buildHud(root, '42', noop);
+    const solar: EclipseEvent = {
+      day: 184, moonIndex: 0, body: 'solar', kind: 'total',
+      track: { centerLatDeg: 0, halfWidthDeg: 1.2, startLonDeg: -40, endLonDeg: 10, durationDays: 0.01 },
+    };
+    const lunar: EclipseEvent = { day: 40, moonIndex: 1, body: 'lunar', kind: 'annular', track: null };
+    const dropped: EclipseEvent = { day: 999, moonIndex: 0, body: 'solar', kind: 'total', track: null };
+    hud.setEclipses([solar, lunar, dropped], 368);
+
+    const scrubberRow = root.querySelector('.hud-scrubber')!;
+    const overlay = scrubberRow.querySelector('.hud-eclipse-marks');
+    expect(overlay).not.toBeNull(); // must be nested under scrubberRow, not a loose child of root
+    expect(root.querySelector(':scope > .hud-eclipse-marks')).toBeNull(); // never a loose sibling of the hud rows
+
+    const marks = [...overlay!.querySelectorAll('.hud-eclipse-mark')];
+    expect(marks).toHaveLength(2); // the out-of-range event is dropped
+    expect(marks[0]!.classList.contains('hud-eclipse-solar')).toBe(true);
+    expect(marks[0]!.classList.contains('hud-eclipse-total')).toBe(true);
+    expect(marks[1]!.classList.contains('hud-eclipse-lunar')).toBe(true);
+    expect(marks[1]!.classList.contains('hud-eclipse-annular')).toBe(true);
+  });
+
+  it('setEclipses replaces the previous marks rather than accumulating them', () => {
+    const root = document.createElement('div');
+    const hud = buildHud(root, '42', noop);
+    const event: EclipseEvent = { day: 40, moonIndex: 0, body: 'lunar', kind: 'total', track: null };
+    hud.setEclipses([event], 368);
+    hud.setEclipses([event], 368);
+    expect(root.querySelectorAll('.hud-eclipse-mark').length).toBe(1);
+  });
+
+  it('clicking an eclipse mark fires onEclipseMark with the original event', () => {
+    const root = document.createElement('div');
+    let got: EclipseEvent | null = null;
+    const hud = buildHud(root, '42', { ...noop, onEclipseMark: (e: EclipseEvent) => { got = e; } });
+    const event: EclipseEvent = { day: 184, moonIndex: 0, body: 'solar', kind: 'total', track: null };
+    hud.setEclipses([event], 368);
+    (root.querySelector('.hud-eclipse-mark') as HTMLButtonElement).click();
+    expect(got).toBe(event);
   });
 
   it('setWindsActive toggles the active class', () => {

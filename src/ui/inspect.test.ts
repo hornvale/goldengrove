@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { parseMoons, parseSystem } from '../sim/scene';
-import type { TilesScene } from '../sim/scene';
+import type { EclipseEvent, TilesScene } from '../sim/scene';
 import { moonPhase } from '../sim/ephemeris';
-import { daysToNextFull, moonInfo, namedTarget, settlementInfo, siteInfo, starInfo, worldInfo } from './inspect';
+import {
+  daysToNextFull,
+  eclipseInfo,
+  moonInfo,
+  namedTarget,
+  settlementInfo,
+  siteInfo,
+  starInfo,
+  worldInfo,
+} from './inspect';
 
 // Inlined verbatim from src/sim/ephemeris.test.ts (the seed-42 golden
 // system document) — same fixture, same numbers, one more consumer.
@@ -138,6 +147,28 @@ describe('inspector content', () => {
   });
   it("the world card speaks hornvale's vocabulary: obliquity", () => {
     expect(worldInfo(sys, 0).lines.some((l) => l.includes('obliquity'))).toBe(true);
+  });
+  it('names the body, kind, moon, and day on a solar-total eclipse card', () => {
+    const event: EclipseEvent = {
+      day: 184.5,
+      moonIndex: 0,
+      body: 'solar',
+      kind: 'total',
+      track: { centerLatDeg: 0, halfWidthDeg: 1.2, startLonDeg: -40, endLonDeg: 10, durationDays: 0.01 },
+    };
+    const card = eclipseInfo(event);
+    expect(card.title.toLowerCase()).toContain('solar');
+    expect(card.kindLine.toLowerCase()).toContain('total');
+    expect(card.kindLine).toContain('0'); // moon index
+    expect(card.lines.some((l) => l.includes('184.5'))).toBe(true);
+  });
+  it('names the body, kind, moon, and day on a lunar-annular eclipse card', () => {
+    const event: EclipseEvent = { day: 40, moonIndex: 1, body: 'lunar', kind: 'annular', track: null };
+    const card = eclipseInfo(event);
+    expect(card.title.toLowerCase()).toContain('lunar');
+    expect(card.kindLine.toLowerCase()).toContain('annular');
+    expect(card.kindLine).toContain('1'); // moon index
+    expect(card.lines.some((l) => l.includes('40'))).toBe(true);
   });
   it('maps object names to targets, walking prefixes', () => {
     expect(namedTarget('star')).toEqual({ kind: 'star' });
