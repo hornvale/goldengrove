@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { REFERENCE_RADIUS_M, buildFaceGeometry, buildTileGeometry, sampleTile, stitchNormals, tileIndex } from './worldMesh';
+import {
+  REFERENCE_RADIUS_M,
+  buildFaceGeometry,
+  buildRegionTileGeometry,
+  buildTileGeometry,
+  sampleTile,
+  stitchNormals,
+  tileIndex,
+} from './worldMesh';
+import type { RegionScene } from '../sim/scene';
 import { naturalLens } from './lens';
 import { elevationColor } from '../sim/palette';
 import { biomeColorForName } from './biomePalette';
@@ -89,6 +98,31 @@ describe('buildTileGeometry (LOD tiles)', () => {
     for (let i = bareCount; i < pos.count; i++) {
       expect(Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i))).toBeLessThan(surfaceR);
     }
+  });
+  it('buildRegionTileGeometry meshes a region patch on the sphere (its own nodes)', () => {
+    const samples = 4;
+    const nodes = (samples + 1) * (samples + 1);
+    // Only the fields the geometry builder reads (regionPatchUnits: the tile
+    // address + samples; positions: elevation_m). A flat 1000 m patch.
+    const region = {
+      face: 0,
+      level: 2,
+      ix: 1,
+      iy: 1,
+      samples,
+      elevation_m: Array(nodes).fill(1000),
+    } as unknown as RegionScene;
+    const geom = buildRegionTileGeometry(region, 2, 60, ignoreColor, 0.1);
+    // (samples+1)^2 surface vertices + a skirt vertex per edge node (4×(samples+1)).
+    expect(geom.getAttribute('position').count).toBe(nodes + 4 * (samples + 1));
+    // Every surface vertex sits at the displaced (uniform, flat) radius.
+    const pos = geom.getAttribute('position');
+    const surfaceR = Math.hypot(pos.getX(0), pos.getY(0), pos.getZ(0));
+    for (let i = 0; i < nodes; i++) {
+      expect(Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i))).toBeCloseTo(surfaceR, 5);
+    }
+    // ...and it covers less of the sphere than the whole level-2 tile's face.
+    expect(surfaceR).toBeGreaterThan(2); // 60× exaggeration lifts 1000 m above r=2
   });
   it('the four level-1 children tile the whole face (union of sub-squares)', () => {
     const tiles = flatTiles();

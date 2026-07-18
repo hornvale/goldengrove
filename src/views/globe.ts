@@ -8,9 +8,16 @@
  * the three.js scene graph builder (`createGlobeView`) that consumes it.
  */
 import * as THREE from 'three';
-import type { EclipseEvent, Feature, SystemScene, TilesScene } from '../sim/scene';
+import type { EclipseEvent, Feature, RegionScene, SystemScene, TilesScene } from '../sim/scene';
 import { rotationPhase, worldPhase } from '../sim/ephemeris';
-import { REFERENCE_RADIUS_M, buildTileGeometry, sampleTile, stitchNormals, tileIndex } from './worldMesh';
+import {
+  REFERENCE_RADIUS_M,
+  buildRegionTileGeometry,
+  buildTileGeometry,
+  sampleTile,
+  stitchNormals,
+  tileIndex,
+} from './worldMesh';
 import type { Lens } from './lens';
 import { naturalLens } from './lens';
 import {
@@ -266,6 +273,9 @@ export interface GlobeView {
   /** Fill the night side with ambient light (on) so the unlit hemisphere is
    * readable, or leave the honest dark terminator (off, the default). */
   setNightFill(on: boolean): void;
+  /** A requested region patch (true higher-res terrain) arrived for the tile
+   * `key`: cache it and let the next frame rebuild that tile from it. */
+  onRegion(key: string, region: RegionScene): void;
   /** Toggle the seasonal hold (Task 9): freezes the mesh's diurnal spin
    * (`spinGroup.rotation.z`, via `seasonalSpinZ`) while the terminator light
    * keeps tracking the sub-solar latitude, so a year's seasons are watchable
@@ -287,6 +297,7 @@ export function createGlobeView(
   tiles: TilesScene,
   sys: SystemScene,
   eclipses: EclipseEvent[] = [],
+  requestRegion?: (tile: TileId) => void,
 ): GlobeView {
   const root = new THREE.Object3D();
   root.name = 'globe-root';
@@ -322,6 +333,22 @@ export function createGlobeView(
 
   let tileMeshes: THREE.Mesh[] = [];
   let tileGeoms: THREE.BufferGeometry[] = [];
+  // Per-tile colour SOURCE: the base tiles document, or (cast) a region patch
+  // — its own per-node fields carry the same names the lens reads.
+  // `tileIdxByTile[t]` indexes into it: the base tileIndex map for base tiles,
+  // identity for region tiles (a node's index IS its colour index).
+  let tileColorSrc: TilesScene[] = [];
+  // Region patches (true higher-res terrain) for the deep near tiles: cached
+  // by tile key, requested async through the worker. Gated to spinning worlds
+  // (the locked-temperature lens needs width/height a region patch lacks).
+  // REGION_MIN_LEVEL is where the 512-wide base data starts under-sampling.
+  const regionsEnabled = requestRegion !== undefined && sys.world.dayLengthDays !== null;
+  const REGION_MIN_LEVEL = 3;
+  const regionCache = new Map<string, RegionScene>();
+  const regionPending = new Set<string>();
+  // A region tile's colour index is just its node index (0..n²-1) — one shared
+  // identity map for all region tiles (read-only in the repaint).
+  const identityIdx = Int32Array.from({ length: tileGridN * tileGridN }, (_, i) => i);
   // Per-vertex tile-index cache, one Int32Array per tile: a living lens
   // (temperature) or ice recolours per frame, so `repaint` reuses this rather
   // than re-deriving lat/lon → tile per vertex per tick.
@@ -344,10 +371,11 @@ export function createGlobeView(
   }
 
   function rebuildBase(): void {
-    baseColorByTile = tileIdxByTile.map((idx) => {
+    baseColorByTile = tileIdxByTile.map((idx, ti) => {
+      const src = tileColorSrc[ti]!;
       const buf = new Float32Array(idx.length * 3);
       for (let v = 0; v < idx.length; v++) {
-        const rgb = activeLens.colorAt(tiles, idx[v]!, lastDay ?? 0, seasonalCtx);
+        const rgb = activeLens.colorAt(src, idx[v]!, lastDay ?? 0, seasonalCtx);
         buf[3 * v] = rgb[0] / 255;
         buf[3 * v + 1] = rgb[1] / 255;
         buf[3 * v + 2] = rgb[2] / 255;
@@ -379,21 +407,46 @@ export function createGlobeView(
     tileMeshes = [];
     tileGeoms = [];
     tileIdxByTile = [];
+    tileColorSrc = [];
     const scale = reliefScale();
     const skirt = skirtDepthFor(scale);
     for (const t of selected) {
-      const geom = buildTileGeometry(tiles, t, GLOBE_RADIUS, scale, colorAt, skirt);
+      const key = tileKey(t);
+      const wantsRegion = regionsEnabled && t.level >= REGION_MIN_LEVEL;
+      const region = wantsRegion ? regionCache.get(key) : undefined;
+      let geom: THREE.BufferGeometry;
+      if (region) {
+        // True higher-res terrain, coloured by the lens on the region's own
+        // nodes (RegionScene carries the fields colorAt reads).
+        geom = buildRegionTileGeometry(
+          region,
+          GLOBE_RADIUS,
+          scale,
+          (node) => activeLens.colorAt(region as unknown as TilesScene, node, lastDay ?? 0, seasonalCtx),
+          skirt,
+        );
+        tileColorSrc.push(region as unknown as TilesScene);
+        tileIdxByTile.push(identityIdx);
+      } else {
+        geom = buildTileGeometry(tiles, t, GLOBE_RADIUS, scale, colorAt, skirt);
+        tileColorSrc.push(tiles);
+        const grid = tileGrid(t);
+        // Only the surface vertices (n×n) are lens-recoloured; the skirt copies
+        // its edge vertex's colour at build time and is never a data surface.
+        const idx = new Int32Array(tileGridN * tileGridN);
+        for (let i = 0; i < idx.length; i++) idx[i] = tileIndex(tiles, grid.lats[i]!, grid.lons[i]!);
+        tileIdxByTile.push(idx);
+        // Ask for the region if it would sharpen this tile and isn't in flight.
+        if (wantsRegion && !regionPending.has(key)) {
+          regionPending.add(key);
+          requestRegion!(t);
+        }
+      }
       const mesh = new THREE.Mesh(geom, material);
-      mesh.name = `globe-tile-${tileKey(t)}`;
+      mesh.name = `globe-tile-${key}`;
       spinGroup.add(mesh);
       tileMeshes.push(mesh);
       tileGeoms.push(geom);
-      const grid = tileGrid(t);
-      // Only the surface vertices (n×n) are lens-recoloured; the skirt copies
-      // its edge vertex's colour at build time and is never a data surface.
-      const idx = new Int32Array(tileGridN * tileGridN);
-      for (let i = 0; i < idx.length; i++) idx[i] = tileIndex(tiles, grid.lats[i]!, grid.lons[i]!);
-      tileIdxByTile.push(idx);
     }
     // Same-level neighbours share exact edge vertices; reconcile their normals
     // or the directional light draws every seam (worst at 60× relief). Skirts
@@ -424,6 +477,15 @@ export function createGlobeView(
     if (signatureOf(selected) !== currentSignature) buildTiles(selected);
   }
 
+  function onRegion(key: string, region: RegionScene): void {
+    regionPending.delete(key);
+    regionCache.set(key, region);
+    // Invalidate the signature so the next frame's reselect rebuilds the same
+    // set — now with this region cached, the tile builds from true detail.
+    // Naturally debounced: many arrivals before the next frame → one rebuild.
+    currentSignature = '';
+  }
+
   /** Repaints the current tile set for `day`: the active lens's colour per
    * vertex, blended toward `ICE_COLOR` only under `natural` (a data lens must
    * show its data, not decorative ice — the blend would corrupt its colormap).
@@ -440,10 +502,11 @@ export function createGlobeView(
       const color = tileGeoms[ti]!.getAttribute('color') as THREE.BufferAttribute;
       const idx = tileIdxByTile[ti]!;
       const base = baseColorByTile[ti]!;
+      const src = tileColorSrc[ti]!; // base tiles or a region patch
       for (let v = 0; v < idx.length; v++) {
         let r: number, g: number, b: number;
         if (activeLens.dependsOnDay) {
-          const rgb = activeLens.colorAt(tiles, idx[v]!, day, seasonalCtx);
+          const rgb = activeLens.colorAt(src, idx[v]!, day, seasonalCtx);
           r = rgb[0] / 255;
           g = rgb[1] / 255;
           b = rgb[2] / 255;
@@ -453,7 +516,7 @@ export function createGlobeView(
           b = base[3 * v + 2]!;
         }
         if (icy) {
-          const frac = iceFraction(tiles, idx[v]!, day, seasonalCtx);
+          const frac = iceFraction(src, idx[v]!, day, seasonalCtx);
           r += (ICE_COLOR[0] - r) * frac;
           g += (ICE_COLOR[1] - g) * frac;
           b += (ICE_COLOR[2] - b) * frac;
@@ -615,6 +678,7 @@ export function createGlobeView(
     setGlint,
     setNightFill,
     setSeasonalHold,
+    onRegion,
   };
 }
 

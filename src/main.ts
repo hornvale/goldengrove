@@ -17,7 +17,8 @@ import { eclipseInfo, moonInfo, namedTarget, siteInfo, starInfo, worldInfo } fro
 import { clockToDay } from './time/clock';
 import { dayToRawDate, formatRawDate, rawDateToDay } from './time/calendar';
 import { createSystemView } from './views/system';
-import { createGlobeView, RELIEF_EXAGGERATION } from './views/globe';
+import { createGlobeView, RELIEF_EXAGGERATION, type GlobeView } from './views/globe';
+import { TILE_QUADS, tileKey, type TileId } from './views/cubeSphere';
 import { lensById, naturalLens } from './views/lens';
 import { ZoomController, dollyLookAt, dollyPosition, wheelHandoff, type ZoomTarget } from './views/zoom';
 import { SPEED_POLICY, SpeedMemory, clampMult } from './time/speedPolicy';
@@ -112,10 +113,19 @@ function boot(): void {
 
   const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
 
+  // The mounted globe, captured so region-tile replies (LOD stage 4) route to
+  // it — the worker serves those from the persisted post-genesis catalog.
+  let globe: GlobeView | null = null;
   worker.onmessage = (ev: MessageEvent) => {
     const msg = ev.data;
     if (msg.type === 'world') {
-      mountViews(msg.system, msg.moons, msg.neighbors, msg.tiles, msg.eclipses, state);
+      globe = mountViews(msg.system, msg.moons, msg.neighbors, msg.tiles, msg.eclipses, state, worker);
+    } else if (msg.type === 'region') {
+      globe?.onRegion(msg.key, msg.region);
+    } else if (msg.type === 'region-error') {
+      // Non-fatal: the tile keeps its interpolated form. (Left uncleared so a
+      // persistently-failing region isn't re-requested every rebuild.)
+      console.warn(`region ${msg.key} failed: ${msg.message}`);
     } else if (msg.type === 'error') {
       const kind = msg.kind as WorkerErrorKind;
       renderError(kind, titleFor(kind), msg.message, state.seed);
@@ -132,7 +142,8 @@ function mountViews(
   tiles: TilesScene,
   eclipses: EclipsesScene,
   state: AppState,
-): void {
+  worker: Worker,
+): GlobeView {
   app.innerHTML = '';
 
   const stage = document.createElement('div');
@@ -179,7 +190,22 @@ function mountViews(
   // side, not just during the ~1.5s transition.
   const globeScene = new THREE.Scene();
   globeScene.background = new THREE.Color(0x000000);
-  const globeView = createGlobeView(tiles, system, eclipses.events);
+  // Region-tile request bridge (LOD stage 4): the globe asks for a tile's true
+  // higher-res patch; the worker serves it from the persisted catalog and the
+  // reply routes back to `globe.onRegion` (see boot's onmessage). `samples` is
+  // the tile grid resolution (TILE_QUADS), `key` matches reply to request.
+  const requestRegion = (tile: TileId): void => {
+    worker.postMessage({
+      type: 'region',
+      face: tile.face,
+      level: tile.level,
+      ix: tile.ix,
+      iy: tile.iy,
+      samples: TILE_QUADS,
+      key: tileKey(tile),
+    });
+  };
+  const globeView = createGlobeView(tiles, system, eclipses.events, requestRegion);
   globeScene.add(globeView.object3d);
   const globeReach = 6;
   const globeCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, globeReach * 20);
@@ -620,6 +646,7 @@ function mountViews(
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+  return globeView;
 }
 
 boot();

@@ -5,9 +5,10 @@
  * views disagreeing about the same world.
  */
 import * as THREE from 'three';
-import type { TilesScene } from '../sim/scene';
+import type { RegionScene, TilesScene } from '../sim/scene';
 import type { RGB } from './lens';
 import { TILE_QUADS, tileGrid, type TileId } from './cubeSphere';
+import { regionPatchUnits } from './regionPatch';
 
 /** Reference body radius (Earth's, meters) used only to turn raw elevation
  * meters into a *fraction* of a rendered radius before exaggerating — not a
@@ -66,40 +67,82 @@ export function buildTileGeometry(
 ): THREE.BufferGeometry {
   const grid = tileGrid(tile);
   const n = TILE_QUADS + 1;
+  return buildGridGeometry(
+    n,
+    (i) => [grid.units[3 * i]!, grid.units[3 * i + 1]!, grid.units[3 * i + 2]!],
+    (i) => radius * (1 + (reliefScale * sampleTile(tiles, grid.lats[i]!, grid.lons[i]!, 'elevation_m')) / REFERENCE_RADIUS_M),
+    (i) => colorAt(tileIndex(tiles, grid.lats[i]!, grid.lons[i]!)),
+    skirtDepth,
+  );
+}
+
+/** Build a tile from a `scene/tiles-region/v1` patch: the producer's true
+ * higher-res terrain, re-sampled at the tile's own grid rather than
+ * interpolated from the coarse tiles export. Same cube-sphere projection
+ * (`regionPatchUnits`) so it registers on the globe exactly where the
+ * interpolated tile it replaces did. `colorAt(i)` is the lens applied to the
+ * region's node `i` (the region carries the same per-node fields the lens
+ * reads). */
+export function buildRegionTileGeometry(
+  region: RegionScene,
+  radius: number,
+  reliefScale: number,
+  colorAt: (i: number) => RGB,
+  skirtDepth = 0,
+): THREE.BufferGeometry {
+  const units = regionPatchUnits(region);
+  const n = region.samples + 1;
+  return buildGridGeometry(
+    n,
+    (i) => units[i]!,
+    (i) => radius * (1 + (reliefScale * region.elevation_m[i]!) / REFERENCE_RADIUS_M),
+    (i) => colorAt(i), // a region node's index IS the colour index
+    skirtDepth,
+  );
+}
+
+/** Shared cube-sphere grid → geometry: an (n×n) lattice of unit vectors
+ * (`unitAt`) displaced to `radiusAt`, vertex-coloured by `colorOf` (0-255),
+ * plus an optional crack-filling skirt. Both the tiles-export builder and the
+ * region-patch builder are thin wrappers over this. */
+function buildGridGeometry(
+  n: number,
+  unitAt: (i: number) => readonly [number, number, number],
+  radiusAt: (i: number) => number,
+  colorOf: (i: number) => RGB,
+  skirtDepth: number,
+): THREE.BufferGeometry {
   // Growable arrays (the skirt appends past the n×n surface grid).
   const pos: number[] = [];
   const col: number[] = [];
   for (let i = 0; i < n * n; i++) {
-    const lat = grid.lats[i]!;
-    const lon = grid.lons[i]!;
-    const elevation = sampleTile(tiles, lat, lon, 'elevation_m');
-    const radiusAt = radius * (1 + (reliefScale * elevation) / REFERENCE_RADIUS_M);
-    pos.push(grid.units[3 * i]! * radiusAt, grid.units[3 * i + 1]! * radiusAt, grid.units[3 * i + 2]! * radiusAt);
-    const rgb = colorAt(tileIndex(tiles, lat, lon));
+    const [ux, uy, uz] = unitAt(i);
+    const r = radiusAt(i);
+    pos.push(ux * r, uy * r, uz * r);
+    const rgb = colorOf(i);
     col.push(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
   }
+  const q = n - 1;
   const indices: number[] = [];
-  for (let row = 0; row < TILE_QUADS; row++) {
-    for (let c = 0; c < TILE_QUADS; c++) {
+  for (let row = 0; row < q; row++) {
+    for (let c = 0; c < q; c++) {
       const i00 = row * n + c;
       const i10 = row * n + c + 1;
       const i01 = (row + 1) * n + c;
       const i11 = (row + 1) * n + c + 1;
-      // CCW in the face's (a, b) plane, whose u×v = n by construction
-      // (verified for all six faces) — this winding is outward-facing on
+      // CCW in the face's (a, b) plane (u×v = n by construction) — outward on
       // every face without a per-face special case.
       indices.push(i00, i10, i11, i00, i11, i01);
     }
   }
 
   // Skirts: a vertical apron dropped `skirtDepth` (world units) inward from
-  // each of the four tile edges, filling any crack a coarser neighbour leaves
-  // at a mixed-level (CDLOD) boundary. Emitted double-winded so it shows
-  // through a crack from either side; each skirt vertex takes its source edge
-  // vertex's normal (copied after `computeVertexNormals`) so it's lit like the
-  // surface, not a black sliver. Harmless when neighbours are the same level
-  // (it stays hidden below the surface). skirtDepth 0 → no skirt (the ocean
-  // and other callers).
+  // each of the four edges, filling any crack a coarser neighbour leaves at a
+  // mixed-level (CDLOD) boundary. Emitted double-winded so it shows through a
+  // crack from either side; each skirt vertex takes its source edge vertex's
+  // normal (copied after `computeVertexNormals`) so it's lit like the surface,
+  // not a black sliver. Harmless when neighbours match (it stays hidden below
+  // the surface). skirtDepth 0 → no skirt (the ocean and other callers).
   const skirtToEdge: Array<[number, number]> = [];
   if (skirtDepth > 0) {
     const edge = (make: (i: number) => number) => Array.from({ length: n }, (_, i) => make(i));
@@ -112,9 +155,7 @@ export function buildTileGeometry(
     for (const e of edges) {
       const start = pos.length / 3; // index of this edge's first skirt vertex
       for (const v of e) {
-        const gx = grid.units[3 * v]!;
-        const gy = grid.units[3 * v + 1]!;
-        const gz = grid.units[3 * v + 2]!;
+        const [gx, gy, gz] = unitAt(v);
         pos.push(pos[3 * v]! - gx * skirtDepth, pos[3 * v + 1]! - gy * skirtDepth, pos[3 * v + 2]! - gz * skirtDepth);
         col.push(col[3 * v]!, col[3 * v + 1]!, col[3 * v + 2]!);
       }
@@ -131,16 +172,15 @@ export function buildTileGeometry(
     }
   }
 
-  const positions = new Float32Array(pos);
   const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
   geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
   geom.setIndex(indices);
   geom.computeVertexNormals();
   if (skirtToEdge.length > 0) {
     // Give each skirt vertex its edge vertex's (outward) normal, so the double
-    // winding doesn't leave the skirt with a cancelled ~0 normal (which would
-    // render black under the directional-only light).
+    // winding doesn't leave a cancelled ~0 normal (which would render black
+    // under the directional-only light).
     const nrm = geom.getAttribute('normal') as THREE.BufferAttribute;
     for (const [s, e] of skirtToEdge) nrm.setXYZ(s, nrm.getX(e), nrm.getY(e), nrm.getZ(e));
     nrm.needsUpdate = true;
