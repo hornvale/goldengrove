@@ -18,7 +18,13 @@ test("temperatureAt reproduces the Rust producer's temperature_at triples", asyn
     // to quantization precision (~1e-5 degC here). 0.001 degC is loose enough
     // to absorb that noise but tight enough to catch any real evaluator
     // divergence, which would show up as whole degrees of drift.
-    expect(Math.abs(temperatureAt(tiles, row.i, row.day) - row.t)).toBeLessThan(0.001);
+    //
+    // yearPhaseOffset: 0 — this golden predates The Wandering Sun's producer
+    // phase fix (it was captured against the pre-offset `temperature_at`),
+    // so 0 reproduces the exact formula it was pinned against. The offset
+    // itself is covered by the hand-built fixture test below, which mirrors
+    // the Rust producer's own `spinning_seasonal_peak_tracks_the_year_phase_offset`.
+    expect(Math.abs(temperatureAt(tiles, row.i, row.day, 0) - row.t)).toBeLessThan(0.001);
   }
 });
 
@@ -36,8 +42,33 @@ test("temperatureAt reproduces the Rust producer's regional temperature triples"
     // Same tolerance rationale as the global triples test above: the client
     // reconstructs temperatureAt from the quantized regional t_mean_c/t_swing_c
     // coefficients while the golden is the sim's full-precision value.
-    expect(Math.abs(temperatureAt(region, node, day) - t)).toBeLessThan(1e-3);
+    // yearPhaseOffset: 0 — same pre-offset golden rationale as above.
+    expect(Math.abs(temperatureAt(region, node, day, 0) - t)).toBeLessThan(1e-3);
   }
+});
+
+test("temperatureAt's seasonal peak tracks a nonzero yearPhaseOffset", () => {
+  // Mirrors the Rust producer's own
+  // spinning_seasonal_peak_tracks_the_year_phase_offset (domains/climate/src/
+  // temperature.rs, The Wandering Sun Task 2): a hand-built single-tile
+  // fixture, not the wasm golden, so this test exercises the offset term in
+  // isolation. Northern summer (peak) is at frac(day/year + offset) = 0.25.
+  const year = 360;
+  const offset = 0.2;
+  const src = { t_mean_c: [10], t_swing_c: [8], season_period_days: year };
+  const wrap = (phase: number) => ((phase % 1) + 1) % 1;
+  const summerDay = wrap(0.25 - offset) * year;
+  const winterDay = wrap(0.75 - offset) * year;
+  const equinoxDay = wrap(0 - offset) * year;
+  expect(temperatureAt(src, 0, summerDay, offset)).toBeGreaterThan(temperatureAt(src, 0, winterDay, offset) + 1);
+  expect(Math.abs(temperatureAt(src, 0, equinoxDay, offset) - 10)).toBeLessThan(0.2);
+});
+
+test("a nonzero yearPhaseOffset actually changes temperatureAt at a fixed day (mutation check)", () => {
+  // Guards against an offset parameter that's accepted but silently ignored:
+  // the same tile/day must disagree between offset 0 and offset 0.2.
+  const src = { t_mean_c: [10], t_swing_c: [8], season_period_days: 360 };
+  expect(temperatureAt(src, 0, 90, 0)).not.toBeCloseTo(temperatureAt(src, 0, 90, 0.2), 5);
 });
 
 test("windAt buckets by latitude and alternates direction", () => {

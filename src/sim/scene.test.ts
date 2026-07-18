@@ -111,6 +111,7 @@ function validTiles(): Record<string, unknown> {
     moisture: Array(tiles).fill(0.5),
     plate: Array.from({ length: tiles }, (_, i) => i % 4),
     unrest: Array.from({ length: tiles }, (_, i) => (i % 5) / 4),
+    locked: false,
   };
 }
 
@@ -217,6 +218,22 @@ describe('parseTiles', () => {
     const doc = validTiles();
     delete doc.unrest;
     expect(() => parseTiles(JSON.stringify(doc))).toThrow(SceneFormatError);
+  });
+
+  it('rejects a document missing locked', () => {
+    const doc = validTiles();
+    delete doc.locked;
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('locked');
+  });
+
+  it('round-trips locked: true and locked: false', () => {
+    const lockedDoc = validTiles();
+    lockedDoc.locked = true;
+    expect(parseTiles(JSON.stringify(lockedDoc)).locked).toBe(true);
+
+    const spinningDoc = validTiles();
+    spinningDoc.locked = false;
+    expect(parseTiles(JSON.stringify(spinningDoc)).locked).toBe(false);
   });
 });
 

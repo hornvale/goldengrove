@@ -25,7 +25,7 @@ export function oceanTiles(): TilesScene {
     biome: [0, 0, 0, 0, 0, 0, 0, 0], biomeLegend: ['steppe'], features: [],
     t_mean_c: Array(8).fill(15), t_swing_c: Array(8).fill(5),
     season_period_days: 365, circulationBands: null, moisture: Array(8).fill(0.5),
-    plate: Array(8).fill(0), unrest: Array(8).fill(0),
+    plate: Array(8).fill(0), unrest: Array(8).fill(0), locked: false,
   };
 }
 

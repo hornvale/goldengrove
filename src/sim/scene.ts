@@ -85,6 +85,11 @@ export interface TilesScene {
   circulationBands: number | null;
   /** Moisture per tile, a dimensionless ratio — row-major, matching `elevation_m`. */
   moisture: number[];
+  /** Whether this world is tidally locked — the client reads its seasonal
+   * temperature from the librating-substellar reconstruction (Task 7's
+   * `lockedTemperatureAt`) rather than the spinning-world sinusoid
+   * (`temperatureAt`). */
+  locked: boolean;
 }
 
 /** The fields of a `scene/tiles-region/v1` document — a regional tile
@@ -220,6 +225,12 @@ function requireNumber(doc: Record<string, unknown>, key: string): number {
 function requireString(doc: Record<string, unknown>, key: string): string {
   const value = doc[key];
   if (typeof value !== "string") fail(`${key} must be a string`);
+  return value;
+}
+
+function requireBoolean(doc: Record<string, unknown>, key: string): boolean {
+  const value = doc[key];
+  if (typeof value !== "boolean") fail(`${key} must be a boolean`);
   return value;
 }
 
@@ -462,6 +473,7 @@ export function parseTiles(text: string): TilesScene {
     season_period_days: seasonPeriodDays,
     circulationBands,
     moisture: numberArray(doc, "moisture", tiles),
+    locked: requireBoolean(doc, "locked"),
   };
 }
 

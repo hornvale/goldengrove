@@ -35,8 +35,11 @@ export interface Lens {
   /** Whether `colorAt` varies with `day`. Static lenses bake once at geometry
    * build; only a living lens pays the per-day recolor. */
   dependsOnDay: boolean;
-  /** This lens's color for tile `i` on absolute standard `day`. */
-  colorAt(tiles: TilesScene, i: number, day: number): RGB;
+  /** This lens's color for tile `i` on absolute standard `day`.
+   * `yearPhaseOffset` (`sys.world.yearPhaseOffset`) is optional — only the
+   * temperature lens reads it; every other lens ignores it, and a caller
+   * with no system scene in hand may omit it (treated as 0). */
+  colorAt(tiles: TilesScene, i: number, day: number, yearPhaseOffset?: number): RGB;
   /** The legend rows to draw for this lens. */
   legend(tiles: TilesScene): LegendEntry[];
 }
@@ -113,8 +116,8 @@ export const temperatureLens: Lens = {
   label: 'temperature',
   caption: `surface temperature on the shown day, diverging about freezing and clamped at ±${TEMP_EXTENT} °C; the seasonal curve is the producer’s own evaluator, not a client invention.`,
   dependsOnDay: true,
-  colorAt: (tiles, i, day) =>
-    diverging(TEMP_COLD, TEMP_MID, TEMP_HOT, temperatureAt(tiles, i, day), TEMP_EXTENT),
+  colorAt: (tiles, i, day, yearPhaseOffset = 0) =>
+    diverging(TEMP_COLD, TEMP_MID, TEMP_HOT, temperatureAt(tiles, i, day, yearPhaseOffset), TEMP_EXTENT),
   legend: () => [
     { swatch: TEMP_COLD, label: `≤ −${TEMP_EXTENT} °C` },
     { swatch: TEMP_MID, label: '0 °C' },
