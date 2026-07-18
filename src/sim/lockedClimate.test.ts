@@ -137,6 +137,7 @@ test("lensTemperatureAt adds nothing when dayLengthStd is null (no day length to
 test("lensTemperatureAt: seasonDayOverride pins the season while the diurnal pulse still tracks live day", () => {
   const tiles = dryEquatorialTile();
   tiles.t_swing_c = [9, 9, 9, 9]; // give the season a real signal to hold still against
+  tiles.t_diurnal_amp_c = [12, 12, 12, 12]; // and a real diurnal signal to keep tracking
   const ctx = { yearPhaseOffset: 0.2, obliquityDeg: 21, insolation: 1, dayLengthStd: 1, seasonDayOverride: 100.6 };
   // Same day_fraction (.6), far-apart integer days — the season term must
   // read `seasonDayOverride` (100.6) both times, not the live `day`. Tile 0
@@ -152,4 +153,10 @@ test("lensTemperatureAt: seasonDayOverride pins the season while the diurnal pul
   const c = lensTemperatureAt(tiles, 0, 100.6, free);
   const d = lensTemperatureAt(tiles, 0, 400.6, free);
   expect(c).not.toBe(d);
+  // The other half of the title: with the season pinned (override held at
+  // 100.6), advancing the *fractional* day must still move the temperature —
+  // the diurnal pulse tracks the live clock, not the frozen season. 100.6 and
+  // 100.1 share the pinned season but sit at different local solar times.
+  const morning = lensTemperatureAt(tiles, 0, 100.1, ctx);
+  expect(Math.abs(morning - a)).toBeGreaterThan(0.5);
 });
