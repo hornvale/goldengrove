@@ -77,7 +77,7 @@ describe('buildEclipseBand', () => {
     }
   });
 
-  it('every vertex sits at radius * 1.001 (just above the surface)', () => {
+  it('lifts every vertex above the tallest exaggerated peak (radius * 1.1) so terrain never occludes the band', () => {
     const mesh = buildEclipseBand(track, radius);
     const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
@@ -85,7 +85,7 @@ describe('buildEclipseBand', () => {
       const y = pos.getY(i);
       const z = pos.getZ(i);
       const r = Math.sqrt(x * x + y * y + z * z);
-      expect(r).toBeCloseTo(radius * 1.001, 6);
+      expect(r).toBeCloseTo(radius * 1.1, 6);
     }
   });
 
@@ -120,7 +120,7 @@ describe('buildEclipseBand', () => {
     const mesh = buildEclipseBand(track, radius);
     const mat = mesh.material as THREE.MeshBasicMaterial;
     expect(mat.transparent).toBe(true);
-    expect(mat.opacity).toBeCloseTo(0.4);
+    expect(mat.opacity).toBeCloseTo(0.5);
     expect(mat.depthWrite).toBe(false);
   });
 });

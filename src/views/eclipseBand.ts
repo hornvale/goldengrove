@@ -22,14 +22,20 @@ export const MARGIN = 3;
  * gentle curvature; 24 is plenty even for a wide arc. */
 const LON_STEPS = 24;
 
-/** How far above the surface a band vertex sits, as a multiple of `radius` —
- * the markers' clearance idiom, just enough to never z-fight the terrain. */
-const LIFT = 1.001;
+/** How far above the surface a band vertex sits, as a multiple of `radius`.
+ * The globe mesh exaggerates relief 60× (`RELIEF_EXAGGERATION`), lifting the
+ * tallest peaks to ~1.09× radius, so a band hugging the sphere at 1.001 sits
+ * *below* the mountains and is occluded almost everywhere (only its limb
+ * fragments ever show). Lifting the whole strip above the tallest possible
+ * exaggerated peak makes it clip-free from every camera angle — it reads as
+ * the umbral shadow hovering over the track rather than painted on the
+ * terrain, which is the honest picture (the shadow falls from above). */
+const LIFT = 1.1;
 
 /** Umbral gray — the shadow band's color; semi-transparent so the terrain
  * beneath keeps reading through it. */
-const BAND_COLOR = 0x333333;
-const BAND_OPACITY = 0.4;
+const BAND_COLOR = 0x222222;
+const BAND_OPACITY = 0.5;
 
 /** Whether `event`'s shadow band should show at `day`: solar events only
  * (`GroundTrack` is `null` on lunar events — they have no track, visible from
