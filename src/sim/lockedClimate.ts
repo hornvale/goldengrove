@@ -134,8 +134,10 @@ export function seasonalTemperatureAt(tiles: TilesScene, i: number, day: number,
  * `year_phase` and `day_fraction` from the same absolute `day` the seasonal
  * term uses (no per-tile longitude term — the producer's diurnal model is a
  * planet-synchronized pulse, gated per tile only by latitude/declination).
- * Locked worlds (and any world with no day length) get no diurnal term at
- * all — the producer's `Locked` branch never reads `diurnal_amp`. Extracted
+ * Locked worlds, any world with no day length, and any world with a
+ * non-positive season length (`season_period_days`, guarding the
+ * `yearPhase` division below) get no diurnal term at all — the producer's
+ * `Locked` branch never reads `diurnal_amp`. Extracted
  * as its own pure function so the lens' afternoon-hotter-than-dawn behavior
  * is unit-testable without WebGL. */
 export function lensTemperatureAt(tiles: TilesScene, i: number, day: number, ctx: SeasonalContext): number {

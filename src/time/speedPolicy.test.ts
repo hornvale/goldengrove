@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SPEED_POLICY, SpeedMemory, clampMult } from './speedPolicy';
+import { SPEED_POLICY, SpeedMemory, clampMult, reconcileDayHold } from './speedPolicy';
 
 describe('speed policy', () => {
   it('system rung defaults to ~1 mo/s and is uncapped', () => {
@@ -26,5 +26,44 @@ describe('speed policy', () => {
     const mem = new SpeedMemory();
     mem.remember('globe', 1e7);
     expect(mem.restore('globe')).toBe(2.6e6);
+  });
+});
+
+describe('reconcileDayHold', () => {
+  it('disengages day-hold when a fast mult (into the seasonal-hold regime) is picked', () => {
+    const calls: string[] = [];
+    const on = reconcileDayHold(
+      true,
+      2.6e6,
+      86400,
+      (v) => calls.push(`setDayHold(${v})`),
+      (v) => calls.push(`setDayHoldActive(${v})`),
+    );
+    expect(on).toBe(false);
+    expect(calls).toEqual(['setDayHold(false)', 'setDayHoldActive(false)']);
+  });
+  it('leaves day-hold engaged, with no calls, at a slow mult', () => {
+    const calls: string[] = [];
+    const on = reconcileDayHold(
+      true,
+      3600,
+      86400,
+      (v) => calls.push(`setDayHold(${v})`),
+      (v) => calls.push(`setDayHoldActive(${v})`),
+    );
+    expect(on).toBe(true);
+    expect(calls).toEqual([]);
+  });
+  it('is a no-op when day-hold is already off, regardless of mult', () => {
+    const calls: string[] = [];
+    const on = reconcileDayHold(
+      false,
+      2.6e6,
+      86400,
+      (v) => calls.push(`setDayHold(${v})`),
+      (v) => calls.push(`setDayHoldActive(${v})`),
+    );
+    expect(on).toBe(false);
+    expect(calls).toEqual([]);
   });
 });

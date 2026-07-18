@@ -21,7 +21,7 @@ import { createGlobeView, RELIEF_EXAGGERATION, type GlobeView } from './views/gl
 import { TILE_QUADS, tileKey, type TileId } from './views/cubeSphere';
 import { lensById, naturalLens } from './views/lens';
 import { ZoomController, dollyLookAt, dollyPosition, wheelHandoff, type ZoomTarget } from './views/zoom';
-import { SPEED_POLICY, SpeedMemory, clampMult } from './time/speedPolicy';
+import { SPEED_POLICY, SpeedMemory, clampMult, reconcileDayHold } from './time/speedPolicy';
 import type { EclipsesScene, MoonsScene, NeighborsScene, SystemScene, TilesScene } from './sim/scene';
 import { defaultAppState, parseAppState, seedError, serializeAppState, type AppState } from './state/url';
 import { randomSeed } from './ui/seed';
@@ -461,6 +461,11 @@ function mountViews(
       playStartMs = performance.now();
       dayAtPlayStart = day;
       hud.setActiveSpeed(clamped); // corrects the button if the click was over-cap
+      // Watch-a-day and the fast seasonal-hold regime are mutually exclusive
+      // (see onDayHold's doc comment) — a fast pick here disengages an
+      // active day-hold rather than composing with it (onDayHold already
+      // guards the other direction, engaging day-hold at a fast rate).
+      dayHoldOn = reconcileDayHold(dayHoldOn, clamped, SEASONAL_HOLD_MULT, globeView.setDayHold, hud.setDayHoldActive);
       applySeasonalHold(clamped);
     },
     onFreezeSpin() {

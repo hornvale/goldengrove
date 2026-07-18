@@ -22,6 +22,30 @@ export function clampMult(view: ZoomTarget, mult: number): number {
   return max === null ? mult : Math.min(mult, max);
 }
 
+/** Watch-a-day ("day-hold") and the fast seasonal-hold regime are mutually
+ * exclusive: day-hold pins the season so the diurnal pulse reads at a
+ * watchable pace, but a `mult` above `seasonalHoldMult` lets the day keep
+ * racing anyway while the season sits frozen, aliasing the pulse into noise.
+ * Called wherever the active mult changes; when day-hold is on and `mult`
+ * crosses into the fast regime, runs `setDayHold(false)` /
+ * `setDayHoldActive(false)` and returns the disengaged state. A no-op
+ * (returns `dayHoldOn` unchanged, no calls) when day-hold is already off or
+ * `mult` stays in the watchable regime. */
+export function reconcileDayHold(
+  dayHoldOn: boolean,
+  mult: number,
+  seasonalHoldMult: number,
+  setDayHold: (on: boolean) => void,
+  setDayHoldActive: (on: boolean) => void,
+): boolean {
+  if (dayHoldOn && mult > seasonalHoldMult) {
+    setDayHold(false);
+    setDayHoldActive(false);
+    return false;
+  }
+  return dayHoldOn;
+}
+
 /** Remembers the user's last speed choice per rung; restores it (clamped)
  * or the rung default. Session-local — deliberately not URL state. */
 export class SpeedMemory {
