@@ -107,6 +107,8 @@ function validTiles(): Record<string, unknown> {
     t_mean_c: Array(tiles).fill(15.0),
     t_swing_c: Array(tiles).fill(5.0),
     t_diurnal_amp_c: Array(tiles).fill(8.0),
+    current_east: Array(tiles).fill(0.1),
+    current_north: Array(tiles).fill(-0.05),
     season_period_days: 365.25,
     circulation_bands: 3,
     moisture: Array(tiles).fill(0.5),
@@ -195,6 +197,38 @@ describe('parseTiles', () => {
     const doc = validTiles();
     delete doc.t_diurnal_amp_c;
     expect(() => parseTiles(JSON.stringify(doc))).toThrow('t_diurnal_amp_c');
+  });
+
+  it('reads current_east/current_north onto currentEast/currentNorth', () => {
+    const t = parseTiles(JSON.stringify(validTiles()));
+    expect(t.currentEast.length).toEqual(128);
+    expect(t.currentNorth.length).toEqual(128);
+    expect(t.currentEast[0]).toEqual(0.1);
+    expect(t.currentNorth[0]).toEqual(-0.05);
+  });
+
+  it('rejects a current_east whose length disagrees with the lattice', () => {
+    const doc = validTiles();
+    (doc.current_east as number[]).pop();
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('current_east');
+  });
+
+  it('rejects a document missing current_east', () => {
+    const doc = validTiles();
+    delete doc.current_east;
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('current_east');
+  });
+
+  it('rejects a current_north whose length disagrees with the lattice', () => {
+    const doc = validTiles();
+    (doc.current_north as number[]).pop();
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('current_north');
+  });
+
+  it('rejects a document missing current_north', () => {
+    const doc = validTiles();
+    delete doc.current_north;
+    expect(() => parseTiles(JSON.stringify(doc))).toThrow('current_north');
   });
 
   it('treats an absent circulation_bands as null (locked world)', () => {

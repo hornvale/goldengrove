@@ -32,6 +32,7 @@ import {
 } from './cubeSphere';
 import { createOcean } from './ocean';
 import { createWinds } from './winds';
+import { createCurrents } from './currents';
 import { iceFraction } from './ice';
 import { systemSeasonalContext } from '../sim/lockedClimate';
 import { MARGIN as ECLIPSE_MARGIN, bandVisibleAt, buildEclipseBand } from './eclipseBand';
@@ -264,6 +265,9 @@ export interface GlobeView {
   /** Show or hide the prevailing-wind overlay — a no-op on a tidally locked
    * world, where `createWinds` built nothing to show. */
   setWinds(on: boolean): void;
+  /** Show or hide the ocean-current advection overlay (The Gyre) — a no-op
+   * when `createCurrents` built nothing to show (no ocean-current data). */
+  setCurrents(on: boolean): void;
   /** Show or hide the ocean's drifting wave pattern (the normal map). Off
    * leaves a smooth, still sea; the depth grading stays. */
   setWaves(on: boolean): void;
@@ -567,6 +571,17 @@ export function createGlobeView(
   function setWinds(on: boolean): void {
     winds?.setVisible(on);
   }
+
+  // The Gyre's ocean-current advection overlay: same build-once placement as
+  // winds above (the particles' own drift is Task 6's per-frame pass; this
+  // overlay's static seed geometry rides the world's spin like winds does).
+  // `null` when there is no current data to show (a locked world zeroes the
+  // whole field) — nothing to mount or toggle.
+  const currents = createCurrents(tiles, GLOBE_RADIUS);
+  if (currents) spinGroup.add(currents.object3d);
+  function setCurrents(on: boolean): void {
+    currents?.setVisible(on);
+  }
   function setWaves(on: boolean): void {
     ocean.setWaves(on);
   }
@@ -693,6 +708,7 @@ export function createGlobeView(
     setSelected,
     setLens,
     setWinds,
+    setCurrents,
     setWaves,
     setGlint,
     setNightFill,

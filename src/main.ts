@@ -251,6 +251,10 @@ function mountViews(
   // The wind overlay is a single globe-wide toggle (not per-rung like
   // true-scale): it starts hidden, matching `createWinds`'s built geometry.
   let windsOn = false;
+  // The Gyre's ocean-current advection overlay: same single globe-wide
+  // toggle idiom as winds, starting hidden to match `createCurrents`'s built
+  // geometry.
+  let currentsOn = false;
   // Ocean-surface effects start on, matching the ocean material defaults; the
   // HUD reflects that initial state in buildHud.
   let wavesOn = true;
@@ -546,6 +550,11 @@ function mountViews(
       globeView.setWinds(windsOn);
       hud.setWindsActive(windsOn);
     },
+    onCurrents() {
+      currentsOn = !currentsOn;
+      globeView.setCurrents(currentsOn);
+      hud.setCurrentsActive(currentsOn);
+    },
     onEclipseMark(event) {
       infoCard.show(eclipseInfo(event));
     },
@@ -591,6 +600,10 @@ function mountViews(
   hud.setWindsAvailable(
     tiles.circulationBands !== null,
     'no circulation bands: this world is tidally locked',
+  );
+  hud.setCurrentsAvailable(
+    tiles.currentEast.some((v) => v !== 0),
+    'no ocean-current data: this world is tidally locked',
   );
   hud.setEclipses(eclipses.events, system.world.yearDays);
 

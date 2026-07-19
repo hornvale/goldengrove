@@ -56,6 +56,7 @@ function tinyTiles(): TilesScene {
     biome: [0, 0, 0, 0, 0, 0, 0, 0], biomeLegend: ['steppe'],
     features: [{ name: 'Daoqao', kind: 'settlement', latitude: 60, longitude: -170 }],
     t_mean_c: Array(8).fill(15), t_swing_c: Array(8).fill(5), tDiurnalAmpC: Array(8).fill(8),
+    currentEast: Array(8).fill(0), currentNorth: Array(8).fill(0),
     season_period_days: 365, circulationBands: null, moisture: Array(8).fill(0.5),
     plate: Array(8).fill(0), unrest: Array(8).fill(0), locked: false,
   };

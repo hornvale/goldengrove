@@ -28,6 +28,20 @@ test("the vendored binary carries the diurnal amplitude layer", async () => {
   expect(tiles.tDiurnalAmpC.some((a) => a > 0)).toBe(true);
 });
 
+test("the vendored binary carries the ocean-current layer", async () => {
+  const tiles = await loadSeed42Tiles(64);
+  expect(tiles.currentEast.length).toBe(tiles.width * tiles.height);
+  expect(tiles.currentNorth.length).toBe(tiles.width * tiles.height);
+  expect(tiles.currentEast.some((v) => v !== 0)).toBe(true);
+  // Zero over land, per the producer's contract (windows/scene's tiles_scene).
+  for (let i = 0; i < tiles.currentEast.length; i++) {
+    if (!tiles.ocean[i]) {
+      expect(tiles.currentEast[i]).toBe(0);
+      expect(tiles.currentNorth[i]).toBe(0);
+    }
+  }
+});
+
 test("the vendored binary's system document parses strictly", async () => {
   const sys = await loadSeed42System();
   expect(sys.schema).toBe("scene/system/v1");

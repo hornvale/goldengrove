@@ -69,6 +69,7 @@ function tinyTiles(): TilesScene {
     elevation_m: Array(n).fill(0), ocean: Array(n).fill(false),
     biome: Array(n).fill(0), biomeLegend: ['steppe'], features: [],
     t_mean_c: Array(n).fill(15), t_swing_c: Array(n).fill(5), tDiurnalAmpC: Array(n).fill(8),
+    currentEast: Array(n).fill(0), currentNorth: Array(n).fill(0),
     season_period_days: 365, circulationBands: null, moisture: Array(n).fill(0.5),
     plate: Array(n).fill(0), unrest: Array(n).fill(0), locked: false,
   };
