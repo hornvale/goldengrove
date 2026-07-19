@@ -116,7 +116,7 @@ test('the lens roster: every lens repaints the globe and updates its own caption
   expect(baselineShot.length).toBeGreaterThan(5_000);
   expect(baselineCaption).not.toBe('');
 
-  for (const label of ['topographic', 'temperature', 'moisture', 'unrest', 'plates']) {
+  for (const label of ['topographic', 'temperature', 'moisture', 'precip', 'unrest', 'plates']) {
     await page.locator('.hud-lenses button', { hasText: label }).click();
     await expect(globeCanvas).toBeVisible();
     // Let the repaint land before sampling.
