@@ -119,6 +119,14 @@ export interface TilesScene {
    * Rains) — feeds nothing else in the sim, a readable field only. Row-major,
    * matching `elevation_m`. */
   cloudFraction: number[];
+  /** Weather propensity per tile, a dimensionless ratio in [0, 1] (The
+   * Mantle) — how readily this tile's climate spawns visible weather.
+   * Row-major, matching `elevation_m`. */
+  weatherPropensity: number[];
+  /** Cloud type per tile, as an index into the producer's `CloudType`
+   * declaration order (The Mantle), integer 0..=5. Row-major, matching
+   * `elevation_m`. */
+  cloudType: number[];
 }
 
 /** The fields of a `scene/tiles-region/v1` document — a regional tile
@@ -586,6 +594,8 @@ export function parseTiles(text: string): TilesScene {
     snowFraction: numberArray(doc, "snow_fraction", tiles),
     precipRegime: intArrayInRange(doc, "precip_regime", tiles, 0, 3),
     cloudFraction: numberArray(doc, "cloud_fraction", tiles),
+    weatherPropensity: numberArray(doc, "weather_propensity", tiles),
+    cloudType: intArrayInRange(doc, "cloud_type", tiles, 0, 5),
   };
 }
 

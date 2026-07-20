@@ -29,6 +29,7 @@ export function oceanTiles(): TilesScene {
     plate: Array(8).fill(0), unrest: Array(8).fill(0), locked: false,
     precipMmYr: Array(8).fill(800), snowFraction: Array(8).fill(0.1),
     precipRegime: Array(8).fill(0), cloudFraction: Array(8).fill(0.4),
+    weatherPropensity: Array(8).fill(0.6), cloudType: Array(8).fill(0),
   };
 }
 
