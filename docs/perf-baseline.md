@@ -18,6 +18,8 @@ Smoothness on real hardware is judged by the controller's visual pass.
 | long-task max (ms) | 4098 | — |
 | buildTiles calls | (instrumented in T3) | — |
 
+**After T2 (analytic normals):** flamegraph — `stitchNormals` ELIMINATED (35% -> ~2% `analyticNormal`); `buildTiles` per-call cost collapsed (52% -> ~5% of CPU, ~12s -> ~4s absolute), since the O(all-vertices) stitch was most of a rebuild. Frame-gap unchanged (the ~30x rebuild FREQUENCY remains -> T3). Visual: no tile-boundary seams; relief reads. 450 tests green.
+
 **Flamegraph (baseline):** `buildTiles` ~52% of CPU, `stitchNormals` ~35%
 (`keyAt` string-building ~12%), running ~30× per zoom as the CDLOD leaf set
 changes each frame + on region arrivals. The globe is effectively frozen
