@@ -691,7 +691,14 @@ export function createGlobeView(
   // reads as settling).
   const SETTLE_EPSILON = GLOBE_RADIUS * 0.0015;
   const SETTLE_FRAMES_NEEDED = 2;
-  let prevCamLocal: THREE.Vector3 | null = null;
+  // The settle gate tracks the USER's camera in WORLD space — deliberately not
+  // the spun `localCam` below. The globe's own diurnal spin advances
+  // `spinGroup.rotation.z` every frame under autoplay, so a camera re-expressed
+  // in the spinning frame is never still while the clock runs; keying settle off
+  // it would hold refinement forever and the globe would never sharpen past the
+  // coarse set while time plays. The user's world-space camera pose is what a
+  // "fling" actually moves, and it is stationary the instant they stop.
+  let prevCamWorld: THREE.Vector3 | null = null;
   let settledFrames = 0;
 
   const localCam = new THREE.Vector3(); // reselect scratch — no per-frame alloc
@@ -702,12 +709,16 @@ export function createGlobeView(
    * last-applied set), gate refinement while the camera is still moving, and
    * apply the result incrementally only if it actually changed. */
   function reselect(camera: THREE.Camera): void {
-    localCam.copy(camera.position).applyAxisAngle(spinZAxis, -spinGroup.rotation.z);
-    const moved = prevCamLocal === null || localCam.distanceTo(prevCamLocal) > SETTLE_EPSILON;
+    // Settle on the user's world-space camera motion (see `prevCamWorld`).
+    const moved = prevCamWorld === null || camera.position.distanceTo(prevCamWorld) > SETTLE_EPSILON;
     settledFrames = moved ? 0 : settledFrames + 1;
-    if (prevCamLocal === null) prevCamLocal = localCam.clone();
-    else prevCamLocal.copy(localCam);
+    if (prevCamWorld === null) prevCamWorld = camera.position.clone();
+    else prevCamWorld.copy(camera.position);
 
+    // Tile SELECTION uses the camera in the spinning globe's local frame (the
+    // tiles live under `spinGroup`); as the world turns, this sweeps and the
+    // leaf set follows the surface now facing the camera.
+    localCam.copy(camera.position).applyAxisAngle(spinZAxis, -spinGroup.rotation.z);
     const target = selectTiles(
       [localCam.x, localCam.y, localCam.z],
       GLOBE_RADIUS,

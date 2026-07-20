@@ -174,6 +174,25 @@ test('onRegion swaps only the arriving tile to region geometry — other tiles k
   expect(after.get(otherKey!)!.geometry).toBe(otherGeomBefore);
 });
 
+test('refines under autoplay spin: a still camera reaches a deep tile while the world rotates (settle keys off the user camera, not the diurnal spin)', () => {
+  const view = createGlobeView(markerTiles([]), spinningSys(), [], () => {});
+  view.setLens(moistureLens);
+
+  // Camera parked just above the surface and NEVER moved — but the day
+  // advances each frame, so the world spins (spinGroup.rotation.z tracks
+  // rotationPhase). The settle gate must key off the user's world-space camera
+  // (still), not the camera re-expressed in the spinning frame (which sweeps
+  // with the world). The earlier version measured the spun frame, so under any
+  // playing clock the gate never released and the globe stayed at
+  // LOD_MIN_LEVEL — this asserts refinement survives a live clock.
+  const camera = new THREE.PerspectiveCamera();
+  camera.position.set(GLOBE_RADIUS * 1.001, 0, 0);
+  for (let f = 0; f < 8; f++) view.update(f * 0.05, camera); // ~0.35 day of spin
+
+  const maxLevel = Math.max(...[...tileMeshesByKey(view).keys()].map((k) => Number(k.split(':')[1])));
+  expect(maxLevel).toBeGreaterThanOrEqual(3); // reached REGION_MIN_LEVEL despite the spin (buggy gate froze at 1)
+});
+
 test('sampleTile maps lat/lon to the row-major equirect lattice', () => {
   // 4×2 lattice: row 0 is lat +90..0, col 0 is lon -180.
   const tiles = { width: 4, height: 2, elevation_m: [0, 1, 2, 3, 4, 5, 6, 7] } as never;
