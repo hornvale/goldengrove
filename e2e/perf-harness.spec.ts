@@ -1,12 +1,27 @@
 import { test } from '@playwright/test';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
-const OUT = '/private/tmp/claude-501/-Users-nathan-Projects-hornvale-hornvale/456ac023-c6c2-4ed9-b479-2348d714a6a5/scratchpad/perf';
+// Repo-relative output (was a hard-coded machine scratchpad path — which
+// ENOENT-failed on CI runners). `mkdir -p` so a fresh checkout can't miss it,
+// and every write is best-effort: this is a DIAGNOSTIC, never a gate, so a
+// failed artifact write must not fail the run.
+const OUT_DIR = 'test-results/perf';
+mkdirSync(OUT_DIR, { recursive: true });
+const OUT = `${OUT_DIR}/run`;
+const dump = (name: string, data: string): void => {
+  try {
+    writeFileSync(name, data);
+  } catch {
+    /* diagnostic artifact — never fail the run on a write error */
+  }
+};
 
 // PROFILE the zoom-in jerkiness (systematic-debugging Phase 1 evidence).
 // Captures a V8 CPU profile via CDP + long-task durations + frame gaps while
 // scripting a deep zoom that triggers LOD refinement and region streaming.
-test('perf harness: deep zoom-in', async ({ page }) => {
+// `@perf` keeps it OUT of the deploy-gating `npm run e2e` (see package.json) —
+// it is a controller tool with no assertions, run on demand via `npm run perf`.
+test('perf harness: deep zoom-in @perf', async ({ page }) => {
   test.setTimeout(240_000);
   await page.goto('#seed=42&view=globe&day=0.25');
   await page.locator('.hud-top-left').getByText('seed 42').waitFor({ timeout: 150_000 });
@@ -54,7 +69,7 @@ test('perf harness: deep zoom-in', async ({ page }) => {
   await page.waitForTimeout(3000);
 
   const { profile } = await client.send('Profiler.stop');
-  writeFileSync(`${OUT}-zoom.cpuprofile`, JSON.stringify(profile));
+  dump(`${OUT}-zoom.cpuprofile`, JSON.stringify(profile));
 
   const stats = await page.evaluate(() => {
     const gaps: number[] = (window as any).__gaps;
@@ -77,6 +92,6 @@ test('perf harness: deep zoom-in', async ({ page }) => {
       region_swaps,
     };
   });
-  writeFileSync(`${OUT}-stats.json`, JSON.stringify(stats, null, 2));
+  dump(`${OUT}-stats.json`, JSON.stringify(stats, null, 2));
   console.log('ZOOM_STATS', JSON.stringify(stats));
 });
