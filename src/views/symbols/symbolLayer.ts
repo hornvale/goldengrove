@@ -1,7 +1,10 @@
 /** The symbol layer: a `THREE.Group` of sprites (mountain peaks, forest
- * tree-clusters, settlements) placed on the globe, selected per zoom rung
- * against the salience budget (`./budget`), culled to the near hemisphere
- * (`../globe`'s `onNearSide`). This is the visible payoff of The Cartographer.
+ * tree-clusters) placed on the globe, selected per zoom rung against the
+ * salience budget (`./budget`), culled to the near hemisphere (`../globe`'s
+ * `onNearSide`). This is the visible payoff of The Cartographer. Settlements
+ * are NOT drawn here — the globe's own always-on markers (`../globe`'s
+ * `buildSiteMarker`) already cover them, so this layer stays peaks+forests
+ * only to avoid doubling up.
  *
  * Extraction (`./extract`) runs once at build time — the tile data doesn't
  * change under a mounted layer, only the camera does — so `update` only
@@ -9,7 +12,7 @@
  */
 import * as THREE from 'three';
 import type { TilesScene } from '../../sim/scene';
-import { GLOBE_RADIUS, latLonToUnit, onNearSide, clusterFeatures } from '../globe';
+import { GLOBE_RADIUS, latLonToUnit, onNearSide } from '../globe';
 import type { Peak, ForestRegion } from './extract';
 import { extractForests, extractPeaks } from './extract';
 import type { Rung } from './budget';
@@ -37,9 +40,8 @@ const PEAK_SCALE_MIN = 0.02;
 const PEAK_SCALE_ELEVATION_FACTOR = 0.00001;
 const PEAK_SCALE_MAX = 0.08;
 
-/** Tree/settlement sprite scale, in units of `GLOBE_RADIUS`. */
+/** Tree sprite scale, in units of `GLOBE_RADIUS`. */
 const TREE_SCALE = 0.018;
-const SETTLEMENT_SCALE = 0.02;
 
 /** Max tree sprites drawn per forest region (also clamps the log2(area)
  * placement count below). */
@@ -87,15 +89,6 @@ function buildTreeMaterial(): THREE.SpriteMaterial {
   }, 0x3f7d3f);
 }
 
-function buildSettlementMaterial(): THREE.SpriteMaterial {
-  return buildSymbolMaterial((ctx, size) => {
-    ctx.fillStyle = '#e8e0c0';
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size * 0.28, 0, Math.PI * 2);
-    ctx.fill();
-  }, 0xe8e0c0);
-}
-
 /** A built sprite tagged with the unit "up" direction it was placed at, so
  * the near-side cull (`onNearSide`) doesn't need to re-derive it from
  * position/GLOBE_RADIUS each frame. */
@@ -122,18 +115,16 @@ export interface SymbolLayer {
   dispose(): void;
 }
 
-/** Build the symbol layer for `tiles`: extracts peaks/forests/settlement
- * sites once, builds the three shared sprite materials once, and returns a
- * layer whose `update` rebuilds the (budget-bounded, so cheap) child set
- * only when the rung actually changes. */
+/** Build the symbol layer for `tiles`: extracts peaks/forests once, builds
+ * the two shared sprite materials once, and returns a layer whose `update`
+ * rebuilds the (budget-bounded, so cheap) child set only when the rung
+ * actually changes. */
 export function buildSymbolLayer(tiles: TilesScene): SymbolLayer {
   const peaks: Peak[] = extractPeaks(tiles);
   const forests: ForestRegion[] = extractForests(tiles);
-  const sites = clusterFeatures(tiles.features);
 
   const peakMaterial = buildPeakMaterial();
   const treeMaterial = buildTreeMaterial();
-  const settlementMaterial = buildSettlementMaterial();
 
   const group = new THREE.Group();
   group.name = 'symbol-layer';
@@ -161,10 +152,6 @@ export function buildSymbolLayer(tiles: TilesScene): SymbolLayer {
         group.add(placedSprite(treeMaterial, lat, lon, TREE_SCALE));
       }
     }
-
-    for (const site of sites) {
-      group.add(placedSprite(settlementMaterial, site.latitude, site.longitude, SETTLEMENT_SCALE));
-    }
   }
 
   function update(rung: Rung, camWorld: THREE.Vector3): void {
@@ -180,7 +167,7 @@ export function buildSymbolLayer(tiles: TilesScene): SymbolLayer {
 
   function dispose(): void {
     while (group.children.length > 0) group.remove(group.children[0]!);
-    for (const material of [peakMaterial, treeMaterial, settlementMaterial]) {
+    for (const material of [peakMaterial, treeMaterial]) {
       material.map?.dispose();
       material.dispose();
     }

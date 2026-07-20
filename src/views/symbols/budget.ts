@@ -7,8 +7,6 @@ export interface RungBudget {
   peaks: number;
   /** Max number of forest symbols to show at this rung. */
   forests: number;
-  /** Whether settlement labels are shown at this rung. */
-  showSettlementLabels: boolean;
   /** Minimum elevation (m) a peak must have to be eligible at this rung. */
   peakMinElevationM: number;
   /** Minimum area a forest patch must have to be eligible at this rung. */
@@ -18,9 +16,9 @@ export interface RungBudget {
 // Visual-pass-tuned. Thresholds fall and budgets rise as we zoom in, so finer
 // features emerge. Angular radius (rad) of the visible cap drives the rung.
 export const RUNG_BUDGETS: Record<Rung, RungBudget> = {
-  far: { peaks: 12, forests: 8, showSettlementLabels: false, peakMinElevationM: 3000, forestMinArea: 60 },
-  mid: { peaks: 40, forests: 30, showSettlementLabels: false, peakMinElevationM: 1500, forestMinArea: 15 },
-  near: { peaks: 120, forests: 90, showSettlementLabels: true, peakMinElevationM: 500, forestMinArea: 3 },
+  far: { peaks: 12, forests: 8, peakMinElevationM: 3000, forestMinArea: 60 },
+  mid: { peaks: 40, forests: 30, peakMinElevationM: 1500, forestMinArea: 15 },
+  near: { peaks: 120, forests: 90, peakMinElevationM: 500, forestMinArea: 3 },
 };
 
 /** Coarser rung when more of the sphere is visible. Boundaries visual-tuned. */
