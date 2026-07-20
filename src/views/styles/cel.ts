@@ -9,6 +9,9 @@ const vertexShader = /* glsl */ `
   void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
 `;
 
+// Note: variable names must avoid GLSL ES 3.00 (WebGL2) reserved words — `flat`
+// is an interpolation qualifier, and naming a variable `flat` silently fails the
+// whole shader compile (→ a black screen). Hence `celCol` below.
 const fragmentShader = /* glsl */ `
   uniform sampler2D tDiffuse;
   uniform vec2 uTexel;      // 1/resolution
@@ -16,25 +19,34 @@ const fragmentShader = /* glsl */ `
   uniform float uEdge;      // edge threshold
   varying vec2 vUv;
   float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+  float lum(vec2 uv) { return luma(texture2D(tDiffuse, uv).rgb); }
   void main() {
     vec4 src = texture2D(tDiffuse, vUv);
-    // Posterize by banding the luminance, keep hue.
+    // Posterize the luminance into flat bands, keeping hue. Band CENTRES
+    // ((floor(l*n)+0.5)/n) so the darkest band is 0.5/n, never 0 (round-to-band
+    // zeroes every pixel below one band-width — deep ocean fell into it).
     float l = luma(src.rgb);
-    float banded = floor(l * uBands + 0.5) / uBands;
-    vec3 flat = src.rgb * (banded / max(l, 1e-3));
-    // Sobel on luminance for the ink outline.
-    float gx = 0.0, gy = 0.0;
-    float k[9]; k[0]=-1.;k[1]=0.;k[2]=1.;k[3]=-2.;k[4]=0.;k[5]=2.;k[6]=-1.;k[7]=0.;k[8]=1.;
-    int idx = 0;
-    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-      float s = luma(texture2D(tDiffuse, vUv + vec2(float(x), float(y)) * uTexel).rgb);
-      gx += s * k[idx];
-      gy += s * k[8 - idx];
-      idx++;
-    }
+    float banded = (floor(l * uBands) + 0.5) / uBands;
+    vec3 celCol = src.rgb * (banded / max(l, 1e-3));
+    // Sobel on luminance for the ink outline — explicit taps (no dynamically
+    // indexed local array, which some GL backends miscompile).
+    float tl = lum(vUv + vec2(-1.0, -1.0) * uTexel);
+    float tm = lum(vUv + vec2(0.0, -1.0) * uTexel);
+    float tr = lum(vUv + vec2(1.0, -1.0) * uTexel);
+    float ml = lum(vUv + vec2(-1.0, 0.0) * uTexel);
+    float mr = lum(vUv + vec2(1.0, 0.0) * uTexel);
+    float bl = lum(vUv + vec2(-1.0, 1.0) * uTexel);
+    float bm = lum(vUv + vec2(0.0, 1.0) * uTexel);
+    float br = lum(vUv + vec2(1.0, 1.0) * uTexel);
+    float gx = -tl - 2.0 * ml - bl + tr + 2.0 * mr + br;
+    float gy = -tl - 2.0 * tm - tr + bl + 2.0 * bm + br;
     float edge = sqrt(gx * gx + gy * gy);
     float ink = smoothstep(uEdge, uEdge * 2.0, edge);
-    gl_FragColor = vec4(mix(flat, vec3(0.05, 0.05, 0.08), ink), src.a);
+    // Keep near-black space black; opaque output.
+    vec3 col = max(src.r, max(src.g, src.b)) < 0.02
+      ? vec3(0.0)
+      : mix(celCol, vec3(0.05, 0.05, 0.08), ink);
+    gl_FragColor = vec4(col, 1.0);
   }
 `;
 
@@ -52,10 +64,8 @@ export const celStyle: RenderStyle = {
       vertexShader,
       fragmentShader,
     });
-    // ShaderPass CLONES the uniforms above, so the live uniform the shader reads
-    // is `pass.uniforms.uTexel` — NOT the object literal we passed in. Capture it
-    // AFTER construction; the composer calls this setSize (via
-    // EffectComposer.addPass/setSize) with the drawing-buffer dimensions.
+    // ShaderPass CLONES the uniforms, so capture the live `uTexel` AFTER
+    // construction; the composer calls setSize with the drawing-buffer size.
     const uTexel = pass.uniforms.uTexel!.value as THREE.Vector2;
     (pass as unknown as { setSize: (w: number, h: number) => void }).setSize = (w, h) => {
       uTexel.set(1 / w, 1 / h);
