@@ -1,4 +1,5 @@
 import { LENSES, type Lens, type LegendEntry } from '../views/lens';
+import { STYLES, type RenderStyle } from '../views/renderStyle';
 import type { EclipseEvent } from '../sim/scene';
 import { eclipseMarkPositions } from './eclipseMarks';
 
@@ -25,6 +26,8 @@ export interface HudCallbacks {
   onScrub(day: number): void;
   /** The viewer picked a lens (by `Lens.id`). */
   onLens(id: string): void;
+  /** The viewer picked a render style (by `RenderStyle.id`). */
+  onStyle(id: string): void;
   /** The viewer toggled the prevailing-wind overlay. Never fires while the
    * control is disabled (no circulation bands) — the browser's own
    * `disabled` attribute blocks the click before this callback is reached. */
@@ -77,6 +80,8 @@ export interface Hud {
   setDay(day: number): void;
   /** Show `lens` as active: mark its button, draw its legend, show its caption. */
   setLens(lens: Lens, legend: LegendEntry[]): void;
+  /** Show `style` as active: mark its button. */
+  setStyle(style: RenderStyle): void;
   /** Enables or disables the winds toggle. When unavailable, `reason` names
    * why (a tidally locked world has no circulation bands) — shown next to
    * the disabled button rather than the control silently vanishing. */
@@ -228,6 +233,20 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
   const legendBox = el('div', 'hud-legend');
   const lensCaption = el('div', 'hud-caption');
 
+  // The style picker (The Idioms, Task 1): one button per registered style
+  // (STYLES), the same generic way as the lens row above — no per-style
+  // branch. Each button carries `data-style` so a later task's smoke test
+  // can address it directly.
+  const styleRow = el('div', 'hud-styles');
+  const styleButtons = new Map<string, HTMLButtonElement>();
+  for (const style of STYLES) {
+    const b = el('button', '', style.label);
+    b.dataset.style = style.id;
+    b.addEventListener('click', () => cb.onStyle(style.id));
+    styleButtons.set(style.id, b);
+    styleRow.appendChild(b);
+  }
+
   // The prevailing-wind overlay: an overlay, not a lens (it composes with
   // whichever lens is active), but the lens panel is the one HUD container
   // that already carries the base `hud` positioning class — a loose element
@@ -278,7 +297,7 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
   oceanRow.append(wavesToggle, glintToggle, nightFillToggle);
 
   const lensPanel = el('div', 'hud hud-lens-panel');
-  lensPanel.append(lensRow, legendBox, lensCaption, windsRow, currentsRow, cloudsRow, oceanRow);
+  lensPanel.append(lensRow, styleRow, legendBox, lensCaption, windsRow, currentsRow, cloudsRow, oceanRow);
 
   root.append(topLeft, topRight, bottom, scrubberRow, lensPanel);
   const hud: Hud = {
@@ -318,6 +337,9 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
         legendBox.appendChild(item);
       }
       lensCaption.textContent = lens.caption;
+    },
+    setStyle(style) {
+      for (const [id, b] of styleButtons) b.classList.toggle('active', id === style.id);
     },
     setWindsAvailable: (available, reason) => {
       (windsToggle as HTMLButtonElement).disabled = !available;

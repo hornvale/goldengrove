@@ -4,7 +4,7 @@ import { LENSES, moistureLens } from '../views/lens';
 import type { EclipseEvent } from '../sim/scene';
 
 describe('buildHud interactions', () => {
-  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {}, onScrub(_: number) {}, onLens(_: string) {}, onWinds() {}, onCurrents() {}, onClouds() {}, onEclipseMark(_: EclipseEvent) {}, onFreezeSpin() {}, onDayHold() {}, onWaves() {}, onGlint() {}, onNightFill() {} };
+  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {}, onScrub(_: number) {}, onLens(_: string) {}, onStyle(_: string) {}, onWinds() {}, onCurrents() {}, onClouds() {}, onEclipseMark(_: EclipseEvent) {}, onFreezeSpin() {}, onDayHold() {}, onWaves() {}, onGlint() {}, onNightFill() {} };
 
   it('share button fires onShare and flashes', () => {
     const root = document.createElement('div');

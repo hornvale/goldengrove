@@ -20,6 +20,7 @@ import { createSystemView } from './views/system';
 import { createGlobeView, RELIEF_EXAGGERATION, type GlobeView } from './views/globe';
 import { TILE_QUADS, tileKey, type TileId } from './views/cubeSphere';
 import { lensById, naturalLens } from './views/lens';
+import { StylePipeline, styleById } from './views/renderStyle';
 import { ZoomController, dollyLookAt, dollyPosition, wheelHandoff, type ZoomTarget } from './views/zoom';
 import { SPEED_POLICY, SpeedMemory, clampMult, reconcileDayHold } from './time/speedPolicy';
 import type { EclipsesScene, MoonsScene, NeighborsScene, SystemScene, TilesScene } from './sim/scene';
@@ -239,6 +240,13 @@ function mountViews(
   globeControls.minDistance = globeReach * 0.38; // just above the 60x relief
   globeControls.maxDistance = globeReach * 2;
 
+  // The render-STYLE pipeline (The Idioms, Task 1): screen-space skins over
+  // the globe frame, orthogonal to the data lens. Photoreal (the default) is
+  // an empty pass chain — an EffectComposer whose only pass is the base
+  // RenderPass renders identically to the old direct `renderer.render` call.
+  const stylePipeline = new StylePipeline(globeRenderer, globeScene, globeCamera, tiles);
+  stylePipeline.setStyle(styleById('photoreal'));
+
   // The zoom itself (src/views/zoom.ts): CLOSE_OFFSET is a small, arbitrary
   // "just arrived" framing for the system camera's dolly target (aesthetic,
   // preview-tuned, not a physical scale) — it lands here as the globe
@@ -340,6 +348,7 @@ function mountViews(
   function resize(): void {
     systemRenderer.setSize(window.innerWidth, window.innerHeight);
     globeRenderer.setSize(window.innerWidth, window.innerHeight);
+    stylePipeline.setSize(globeCanvas.clientWidth, globeCanvas.clientHeight);
     const aspect = window.innerWidth / window.innerHeight;
     systemCamera.aspect = aspect;
     systemCamera.updateProjectionMatrix();
@@ -451,7 +460,7 @@ function mountViews(
     globeCanvas.style.opacity = String(z.globeOpacity);
 
     systemRenderer.render(systemScene, systemCamera);
-    globeRenderer.render(globeScene, globeCamera);
+    stylePipeline.render();
   }
 
   const cb: HudCallbacks = {
@@ -553,6 +562,11 @@ function mountViews(
       globeView.setLens(lens);
       hud.setLens(lens, lens.legend(tiles));
     },
+    onStyle(id) {
+      const style = styleById(id);
+      stylePipeline.setStyle(style);
+      hud.setStyle(style);
+    },
     onWinds() {
       windsOn = !windsOn;
       globeView.setWinds(windsOn);
@@ -610,6 +624,7 @@ function mountViews(
   hud.setDay(day % system.world.yearDays);
   updateDateLine();
   hud.setLens(naturalLens, naturalLens.legend(tiles)); // the picker and the globe agree from the first frame
+  hud.setStyle(styleById('photoreal')); // the picker and the pipeline agree from the first frame
   hud.setWindsAvailable(
     tiles.circulationBands !== null,
     'no circulation bands: this world is tidally locked',
