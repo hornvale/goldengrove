@@ -593,7 +593,8 @@ export function createGlobeView(
     for (let v = 0; v < idx.length; v++) {
       let r: number, g: number, b: number;
       if (activeLens.dependsOnDay) {
-        const rgb = activeLens.colorAt(src, idx[v]!, day, seasonalCtx);
+        const rgb0 = activeLens.colorAt(src, idx[v]!, day, seasonalCtx);
+        const rgb = activeBaseTreatment ? activeBaseTreatment.transform(rgb0, src, idx[v]!) : rgb0;
         r = rgb[0] / 255;
         g = rgb[1] / 255;
         b = rgb[2] / 255;
