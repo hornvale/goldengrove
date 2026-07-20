@@ -6,6 +6,7 @@ import {
   buildRegionTileGeometry,
   buildTileGeometry,
   sampleTile,
+  stitchNormals,
   tileIndex,
 } from './worldMesh';
 import type { RegionScene } from '../sim/scene';
@@ -201,11 +202,28 @@ describe('buildFaceGeometry', () => {
   });
 });
 
-// `stitchNormals` (the post-hoc cross-tile normal-averaging pass) is gone —
-// superseded by analytic normals below, which make shared-edge vertices
-// agree BY CONSTRUCTION (both sides derive the normal from the same pure
-// function of (lat, lon) + the elevation field) instead of reconciling
-// disagreeing face-averaged normals after the fact.
+// Analytic normals make BASE tiles agree along shared edges BY CONSTRUCTION
+// (both sides derive the normal from the same pure function of (lat, lon) + the
+// GLOBAL elevation field). This deleted the old O(all-vertices) `stitchNormals`
+// pass for base tiles. It does NOT hold for region patches (see the region test
+// at the end of this block): `sampleRegionElevation` clamps its probe to the
+// patch's own bounds, so a scoped `stitchNormals` over the mounted region set
+// survives for exactly that case.
+
+/** A region patch whose elevation rises linearly west→east across the WHOLE
+ * face (via the tile's global column offset `ix*samples + col`), so two
+ * horizontally-adjacent patches share a continuous elevation at their border
+ * (positions coincide) yet the analytic normal probe — clamped at each patch's
+ * own edge — yields a one-sided normal there. The seam the scoped stitch fixes. */
+function slopedRegion(face: number, level: number, ix: number, iy: number, samples: number): RegionScene {
+  const n = samples + 1;
+  const elevation_m: number[] = [];
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < n; col++) elevation_m.push((ix * samples + col) * 400);
+  }
+  return { face, level, ix, iy, samples, elevation_m, moisture: Array(n * n).fill(0.5) } as unknown as RegionScene;
+}
+
 describe('analytic normals (buildGridGeometry)', () => {
   it('a flat (zero-elevation) patch has purely radial normals', () => {
     const geom = buildTileGeometry(flatZeroTiles(), { face: 0, level: 2, ix: 1, iy: 1 }, 2, 0, ignoreColor, 0);
@@ -260,6 +278,48 @@ describe('analytic normals (buildGridGeometry)', () => {
       checked++;
     }
     expect(checked).toBe(n);
+  });
+
+  it('adjacent REGION patches disagree on shared-edge normals (the probe clamps at the patch bound) — a scoped stitchNormals reconciles them', () => {
+    // Two horizontally-adjacent level-3 patches; A's east edge shares world
+    // position with B's west edge, with continuous elevation across the border.
+    // samples MUST be the production count (TILE_QUADS = 64): at a coarse count
+    // the region cell (~1.4°) dwarfs the 0.2° probe, which then rounds back to
+    // the same node and makes every region normal degenerately radial — a
+    // fixture that hides the very seam under test.
+    const samples = 64; // TILE_QUADS
+    const gA = buildRegionTileGeometry(slopedRegion(0, 3, 0, 0, samples), 2, 60, ignoreColor);
+    const gB = buildRegionTileGeometry(slopedRegion(0, 3, 1, 0, samples), 2, 60, ignoreColor);
+    const n = samples + 1;
+    const posA = gA.getAttribute('position');
+    const nrmA = gA.getAttribute('normal');
+    const posB = gB.getAttribute('position');
+    const nrmB = gB.getAttribute('normal');
+    const pairs: [number, number][] = [];
+    let sawDisagreement = false;
+    for (let row = 0; row < n; row++) {
+      const ia = row * n + (n - 1); // A's east (max-col) edge
+      const ib = row * n; //           B's west (min-col) edge — the shared border
+      // Positions coincide (continuous elevation across the boundary)...
+      expect(posA.getX(ia)).toBeCloseTo(posB.getX(ib), 5);
+      expect(posA.getY(ia)).toBeCloseTo(posB.getY(ib), 5);
+      expect(posA.getZ(ia)).toBeCloseTo(posB.getZ(ib), 5);
+      // ...but the analytic normals need not (the clamped probe is one-sided).
+      const dx = Math.abs(nrmA.getX(ia) - nrmB.getX(ib));
+      const dy = Math.abs(nrmA.getY(ia) - nrmB.getY(ib));
+      const dz = Math.abs(nrmA.getZ(ia) - nrmB.getZ(ib));
+      if (dx > 1e-3 || dy > 1e-3 || dz > 1e-3) sawDisagreement = true;
+      pairs.push([ia, ib]);
+    }
+    expect(pairs.length).toBe(n); // the patches genuinely share an edge
+    expect(sawDisagreement).toBe(true); // ...and analytically disagree (the seam)
+
+    stitchNormals([gA, gB]);
+    for (const [ia, ib] of pairs) {
+      expect(nrmA.getX(ia)).toBeCloseTo(nrmB.getX(ib), 6);
+      expect(nrmA.getY(ia)).toBeCloseTo(nrmB.getY(ib), 6);
+      expect(nrmA.getZ(ia)).toBeCloseTo(nrmB.getZ(ib), 6);
+    }
   });
 });
 

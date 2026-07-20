@@ -193,6 +193,70 @@ test('refines under autoplay spin: a still camera reaches a deep tile while the 
   expect(maxLevel).toBeGreaterThanOrEqual(3); // reached REGION_MIN_LEVEL despite the spin (buggy gate froze at 1)
 });
 
+test('mounted region patches are normal-stitched: adjacent same-level region tiles share identical edge normals (no shading seam)', () => {
+  const view = createGlobeView(markerTiles([]), spinningSys(), [], () => {});
+  view.setLens(moistureLens);
+  const camera = new THREE.PerspectiveCamera();
+  camera.position.set(GLOBE_RADIUS * 1.001, 0, 0);
+  view.update(0, camera);
+  view.update(0, camera);
+  view.update(0, camera); // settled, refined to a deep patch under the camera
+
+  // Find two horizontally-adjacent (same face/level/iy, ix differing by 1)
+  // mounted tiles at >= REGION_MIN_LEVEL — they share an exact edge.
+  const keys = [...tileMeshesByKey(view).keys()];
+  let a: string | null = null;
+  let b: string | null = null;
+  for (const k of keys) {
+    const [f, l, ix, iy] = k.split(':').map(Number) as [number, number, number, number];
+    if (l < 3) continue;
+    const east = `${f}:${l}:${ix + 1}:${iy}`;
+    if (keys.includes(east)) {
+      a = k;
+      b = east;
+      break;
+    }
+  }
+  expect(a).not.toBeNull(); // an adjacent same-level deep pair actually mounted
+  expect(b).not.toBeNull();
+
+  // Deliver sloped, boundary-continuous regions for both, then apply. Elevation
+  // rises west→east by global column so the shared border stays continuous but
+  // the clamped analytic probe would leave a one-sided edge normal without the
+  // scoped stitch.
+  const sloped = (key: string): RegionScene => {
+    const [f, l, ix, iy] = key.split(':').map(Number) as [number, number, number, number];
+    const s = TILE_QUADS;
+    const elevation_m: number[] = [];
+    for (let row = 0; row <= s; row++) for (let col = 0; col <= s; col++) elevation_m.push((ix * s + col) * 400);
+    return { face: f, level: l, ix, iy, samples: s, elevation_m, moisture: Array((s + 1) * (s + 1)).fill(0.5) } as unknown as RegionScene;
+  };
+  view.onRegion(a!, sloped(a!));
+  view.onRegion(b!, sloped(b!));
+  view.update(0, camera); // applies both swaps → stitchMountedRegions reconciles them
+
+  const meshes = tileMeshesByKey(view);
+  const seen = new Map<string, [number, number, number]>();
+  let shared = 0;
+  let allAgree = true;
+  for (const key of [a!, b!]) {
+    const g = meshes.get(key)!.geometry;
+    const pos = g.getAttribute('position');
+    const nrm = g.getAttribute('normal');
+    for (let i = 0; i < pos.count; i++) {
+      const kk = `${pos.getX(i)},${pos.getY(i)},${pos.getZ(i)}`;
+      const n: [number, number, number] = [nrm.getX(i), nrm.getY(i), nrm.getZ(i)];
+      const prev = seen.get(kk);
+      if (prev) {
+        shared++;
+        if (Math.abs(prev[0] - n[0]) > 1e-5 || Math.abs(prev[1] - n[1]) > 1e-5 || Math.abs(prev[2] - n[2]) > 1e-5) allAgree = false;
+      } else seen.set(kk, n);
+    }
+  }
+  expect(shared).toBeGreaterThan(0); // the two patches genuinely share edge vertices (non-vacuous)
+  expect(allAgree).toBe(true); //       and the scoped stitch made their normals identical
+});
+
 test('sampleTile maps lat/lon to the row-major equirect lattice', () => {
   // 4×2 lattice: row 0 is lat +90..0, col 0 is lon -180.
   const tiles = { width: 4, height: 2, elevation_m: [0, 1, 2, 3, 4, 5, 6, 7] } as never;

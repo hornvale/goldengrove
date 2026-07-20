@@ -15,6 +15,7 @@ import {
   buildRegionTileGeometry,
   buildTileGeometry,
   sampleTile,
+  stitchNormals,
   tileIndex,
 } from './worldMesh';
 import type { Lens } from './lens';
@@ -451,6 +452,10 @@ export function createGlobeView(
     idx: Int32Array;
     colorSrc: TilesScene;
     baseColor: Float32Array;
+    /** True iff this slot is a mounted region patch (higher-res terrain), not
+     * a base tile. Region patches need a scoped normal stitch across their
+     * shared edges (`stitchMountedRegions`); base tiles never do. */
+    isRegion: boolean;
   }
   const tileSlots = new Map<string, TileSlot>();
 
@@ -535,7 +540,19 @@ export function createGlobeView(
     const mesh = new THREE.Mesh(geom, material);
     mesh.name = `globe-tile-${key}`;
     spinGroup.add(mesh);
-    return { id: t, mesh, geom, idx, colorSrc, baseColor: computeBaseColor(idx, colorSrc) };
+    return { id: t, mesh, geom, idx, colorSrc, baseColor: computeBaseColor(idx, colorSrc), isRegion: region !== undefined };
+  }
+
+  /** Reconcile normals across the mounted REGION patches so their shared
+   * edges do not draw a shading seam (worldMesh `stitchNormals`, and its doc,
+   * for why base tiles don't need this and region tiles do). Scoped to the
+   * handful of region tiles on screen at deep zoom — never the whole globe.
+   * Idempotent for a fixed set; both sides of every shared edge come out
+   * with the identical normal, which is what removes the crease. */
+  function stitchMountedRegions(): void {
+    const regionGeoms: THREE.BufferGeometry[] = [];
+    for (const slot of tileSlots.values()) if (slot.isRegion) regionGeoms.push(slot.geom);
+    if (regionGeoms.length > 1) stitchNormals(regionGeoms);
   }
 
   /** Dispose+unmount one slot, if present. The other half of `buildTileSlot`
@@ -619,6 +636,7 @@ export function createGlobeView(
     for (const key of [...tileSlots.keys()]) disposeSlot(key);
     const scale = reliefScale();
     for (const t of selected) tileSlots.set(tileKey(t), buildTileSlot(t, scale));
+    stitchMountedRegions(); // no-op unless ≥2 region tiles are mounted
     currentSelected = selected;
     currentSignature = signatureOf(selected);
     repaint(lastDay ?? 0, true);
@@ -638,6 +656,9 @@ export function createGlobeView(
   function applyTileSet(selected: TileId[]): void {
     const t0 = performance.now();
     const { added, removed } = diffTileSets(new Set(tileSlots.keys()), selected);
+    // A region tile leaving the mounted set changes the region-stitch input as
+    // much as one arriving does (captured before disposal reads slot.isRegion).
+    const removedRegion = removed.some((k) => tileSlots.get(k)?.isRegion === true);
     for (const key of removed) disposeSlot(key);
     const scale = reliefScale();
     const toBuild = [...added];
@@ -659,12 +680,20 @@ export function createGlobeView(
       pendingUpgrades.clear();
     }
     const builtKeys: string[] = [];
+    let builtRegion = false;
     for (const t of toBuild) {
       const key = tileKey(t);
       disposeSlot(key); // no-op unless this is a base→region upgrade in place
-      tileSlots.set(key, buildTileSlot(t, scale));
+      const slot = buildTileSlot(t, scale);
+      tileSlots.set(key, slot);
+      if (slot.isRegion) builtRegion = true;
       builtKeys.push(key);
     }
+    // Re-stitch the mounted region set only when it actually changed — a
+    // region tile arrived, swapped in, or left. A base-only LOD change skips
+    // it. Re-stitches the whole (small) mounted region set so a newly-arrived
+    // patch reconciles with its already-mounted neighbours and they with it.
+    if (removedRegion || builtRegion) stitchMountedRegions();
     currentSelected = selected;
     currentSignature = signatureOf(selected);
     if (builtKeys.length > 0) repaintSlots(builtKeys);

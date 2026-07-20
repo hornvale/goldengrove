@@ -290,3 +290,48 @@ export function buildFaceGeometry(
   return buildTileGeometry(tiles, { face, level: 0, ix: 0, iy: 0 }, radius, reliefScale, colorAt);
 }
 
+/** Reconcile the surface normals of a set of geometries so every coincident
+ * vertex position ends up with one shared normal. Analytic normals already
+ * make BASE tiles agree by construction (both sides probe the same global
+ * field), so this is NOT needed there. It IS needed across adjacent REGION
+ * patches: `sampleRegionElevation` clamps its probe to a patch's own bounds,
+ * so a patch's edge vertex sees zero outward slope while its neighbour sees
+ * the real interior slope — the two one-sided normals disagree and the
+ * directional light draws a shading crease (worst at 60× relief). The
+ * proper cure is a 1-node halo in the region export, which needs the wasm
+ * producer; until then the caller scopes this pass to the handful of mounted
+ * region tiles (never the whole globe — that was the O(all-vertices) cost T2
+ * deleted). Keying on the exact float32 position triple is safe because
+ * shared edge vertices are built bit-identically (`regionPatchUnits` derives
+ * them from the same `param`/`faceUnit`). */
+export function stitchNormals(geoms: THREE.BufferGeometry[]): void {
+  const sums = new Map<string, [number, number, number]>();
+  const keyAt = (pos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, i: number) =>
+    `${pos.getX(i)},${pos.getY(i)},${pos.getZ(i)}`;
+  for (const g of geoms) {
+    const pos = g.getAttribute('position');
+    const nrm = g.getAttribute('normal');
+    for (let i = 0; i < pos.count; i++) {
+      const key = keyAt(pos, i);
+      const s = sums.get(key);
+      if (s) {
+        s[0] += nrm.getX(i);
+        s[1] += nrm.getY(i);
+        s[2] += nrm.getZ(i);
+      } else {
+        sums.set(key, [nrm.getX(i), nrm.getY(i), nrm.getZ(i)]);
+      }
+    }
+  }
+  for (const g of geoms) {
+    const pos = g.getAttribute('position');
+    const nrm = g.getAttribute('normal') as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const [x, y, z] = sums.get(keyAt(pos, i))!;
+      const len = Math.hypot(x, y, z) || 1;
+      nrm.setXYZ(i, x / len, y / len, z / len);
+    }
+    nrm.needsUpdate = true;
+  }
+}
+
