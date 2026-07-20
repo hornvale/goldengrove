@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import type { Pass } from 'three/addons/postprocessing/Pass.js';
 import type { TilesScene } from '../sim/scene';
+import { pixelArtStyle } from './styles/pixelArt';
 
 /** A render STYLE: how the globe is drawn, orthogonal to the data lens (which
  * chooses what data is coloured). A style is a chain of screen-space passes
@@ -26,7 +27,7 @@ export const photorealStyle: RenderStyle = {
 };
 
 /** Every registered style, photoreal first. Later tasks push their styles here. */
-export const STYLES: RenderStyle[] = [photorealStyle];
+export const STYLES: RenderStyle[] = [photorealStyle, pixelArtStyle];
 
 /** The style with this id, or photoreal if none matches (a bad URL never crashes). */
 export function styleById(id: string): RenderStyle {
