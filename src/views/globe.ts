@@ -20,6 +20,7 @@ import {
 } from './worldMesh';
 import type { Lens } from './lens';
 import { naturalLens } from './lens';
+import type { BaseTreatment } from './renderStyle';
 import {
   LOD_CDLOD_MAX_LEVEL,
   LOD_MERGE_FACTOR,
@@ -304,6 +305,12 @@ export interface GlobeView {
    * visual spin only; this one freezes the season only, orthogonal state).
    * Off by default, matching today's un-pinned season. */
   setDayHold(on: boolean): void;
+  /** Swap the active base treatment (a style's per-vertex colour transform
+   * applied on top of the lens colour, e.g. pixel-art's data-native ocean
+   * palette): rebuilds the static base colours and repaints immediately, the
+   * same as `setLens`. `null` restores the untouched lens colour (today's
+   * realistic relief). */
+  setBaseTreatment(treatment: BaseTreatment | null): void;
 }
 
 /** Diff two tile-leaf sets by key: `added` are `next` tiles whose key was not
@@ -400,6 +407,11 @@ export function createGlobeView(
   // start on whichever lens is active then, not hardcoded to `natural`.
   let activeLens: Lens = naturalLens;
   let lastDay: number | null = null;
+  // The active style's base treatment (e.g. pixel-art's data-native ocean
+  // palette + quantization), applied on top of the lens colour inside
+  // `computeBaseColor` below. `null` = untouched lens colour (today's
+  // realistic relief).
+  let activeBaseTreatment: BaseTreatment | null = null;
   // Built once from the (fixed, for this view's lifetime) system scene —
   // routes a locked tiles document's temperature through the librating-
   // substellar reconstruction (`../sim/lockedClimate`) instead of the
@@ -476,9 +488,10 @@ export function createGlobeView(
     const buf = new Float32Array(idx.length * 3);
     for (let v = 0; v < idx.length; v++) {
       const rgb = activeLens.colorAt(src, idx[v]!, lastDay ?? 0, seasonalCtx);
-      buf[3 * v] = rgb[0] / 255;
-      buf[3 * v + 1] = rgb[1] / 255;
-      buf[3 * v + 2] = rgb[2] / 255;
+      const shaded = activeBaseTreatment ? activeBaseTreatment.transform(rgb, src, idx[v]!) : rgb;
+      buf[3 * v] = shaded[0] / 255;
+      buf[3 * v + 1] = shaded[1] / 255;
+      buf[3 * v + 2] = shaded[2] / 255;
     }
     return buf;
   }
@@ -857,6 +870,17 @@ export function createGlobeView(
     ocean.object3d.visible = lens.id === naturalLens.id;
   }
 
+  /** Swap the active base treatment: rebuilds the static base colours (now
+   * running through the new treatment inside `computeBaseColor`) and forces
+   * an immediate repaint — the exact same two-call sequence `setLens` uses,
+   * since a treatment change needs the identical push onto the mounted
+   * geometry's `color` attribute that a lens change does. */
+  function setBaseTreatment(treatment: BaseTreatment | null): void {
+    activeBaseTreatment = treatment;
+    rebuildBase();
+    repaint(lastDay ?? 0, true);
+  }
+
   // The water layer: a smooth translucent sphere at sea level, over the
   // displaced seafloor — spinning with the ground so wave motion (stage 2)
   // stays fixed to the world, not the camera.
@@ -1043,6 +1067,7 @@ export function createGlobeView(
     setSeasonalHold,
     setDayHold,
     onRegion,
+    setBaseTreatment,
   };
 }
 
