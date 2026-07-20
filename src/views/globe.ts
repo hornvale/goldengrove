@@ -42,6 +42,8 @@ import { createClouds } from './clouds';
 import { iceFraction } from './ice';
 import { systemSeasonalContext } from '../sim/lockedClimate';
 import { MARGIN as ECLIPSE_MARGIN, bandVisibleAt, buildEclipseBand } from './eclipseBand';
+import type { SymbolLayer } from './symbols/symbolLayer';
+import { rungForZoom } from './symbols/budget';
 
 const TAU = Math.PI * 2;
 
@@ -311,6 +313,15 @@ export interface GlobeView {
    * same as `setLens`. `null` restores the untouched lens colour (today's
    * realistic relief). */
   setBaseTreatment(treatment: BaseTreatment | null): void;
+  /** Mount The Cartographer's symbol layer (peaks/forests/settlements) into
+   * the spinning group so it turns with the planet, and remember it so
+   * `update` drives its per-frame rung/cull. Replaces any previously mounted
+   * layer without disposing it — callers own their layer's lifecycle. */
+  mountSymbolLayer(layer: SymbolLayer): void;
+  /** Unmount the active symbol layer (if any): removes its group from the
+   * spin group and clears the stored reference. Does not dispose it —
+   * callers own their layer's lifecycle. */
+  unmountSymbolLayer(): void;
 }
 
 /** Diff two tile-leaf sets by key: `added` are `next` tiles whose key was not
@@ -985,6 +996,21 @@ export function createGlobeView(
     selectedGroup = featureName === null ? null : `feature-${featureName}`;
   }
 
+  // The Cartographer's symbol layer (Task 5): mounted/unmounted by the
+  // caller (main.ts owns build/dispose), driven per-frame from `update`
+  // below once a camera is available. `null` until mounted.
+  let activeSymbolLayer: SymbolLayer | null = null;
+  function mountSymbolLayer(layer: SymbolLayer): void {
+    spinGroup.add(layer.group);
+    activeSymbolLayer = layer;
+  }
+  function unmountSymbolLayer(): void {
+    if (activeSymbolLayer) {
+      spinGroup.remove(activeSymbolLayer.group);
+      activeSymbolLayer = null;
+    }
+  }
+
   // Task 9's seasonal hold: freezes spinGroup's diurnal spin at the fast
   // clock rates so a year is watchable with the planet holding a face — see
   // `seasonalSpinZ`'s doc comment. Off by default, matching today's spin.
@@ -1043,6 +1069,21 @@ export function createGlobeView(
     }
     reselect(camera); // per-tile CDLOD; reconciles the leaf set (enqueues, retires)
     drainBuildQueue(); // build a few queued tiles this frame (amortized, hole-free)
+    if (activeSymbolLayer) {
+      // `localCam` was just refreshed by `reselect` above: the camera
+      // expressed in the spinning globe's LOCAL (unspun) frame — the same
+      // frame `latLonToUnit` placed every symbol sprite's `userData.up` in
+      // (mirroring how `markers` above rotate their local `up` INTO world
+      // space to compare against world-space `camera.position`; here it's
+      // cheaper to go the other way and compare two local-frame vectors,
+      // which is equivalent since `onNearSide` only cares about the angle
+      // between them). Camera distance from the globe centre is frame-
+      // invariant (rotation preserves length), so `camera.position.length()`
+      // works directly for the rung calculation.
+      const camDistance = camera.position.length();
+      const rung = rungForZoom(Math.acos(Math.min(1, GLOBE_RADIUS / camDistance)));
+      activeSymbolLayer.update(rung, localCam);
+    }
     for (const m of markers) {
       upWorld.copy(m.up).applyAxisAngle(zAxis, spinGroup.rotation.z);
       const near = onNearSide(upWorld, camera.position, GLOBE_RADIUS);
@@ -1069,6 +1110,8 @@ export function createGlobeView(
     setDayHold,
     onRegion,
     setBaseTreatment,
+    mountSymbolLayer,
+    unmountSymbolLayer,
   };
 }
 
