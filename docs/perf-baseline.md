@@ -10,12 +10,12 @@ Smoothness on real hardware is judged by the controller's visual pass.
 
 | Metric | Baseline (origin/main @a3ff771) | After |
 |---|---|---|
-| frame-gap p50 (ms) | 1782 | — |
-| frame-gap p95 (ms) | 3067 | — |
-| frame-gap max (ms) | 4089 | — |
+| frame-gap p50 (ms) | 1782 | **150** |
+| frame-gap p95 (ms) | 3067 | **180** |
+| frame-gap max (ms) | 4089 | **271** |
 | frames > 100ms | 50 / 50 | — |
-| long-task total (ms) | 86635 | — |
-| long-task max (ms) | 4098 | — |
+| long-task total (ms) | 86635 | **11330** |
+| long-task max (ms) | 4098 | **194** |
 | buildTiles calls | (instrumented in T3) | — |
 
 **After T2 (analytic normals):** flamegraph — `stitchNormals` ELIMINATED (35% -> ~2% `analyticNormal`); `buildTiles` per-call cost collapsed (52% -> ~5% of CPU, ~12s -> ~4s absolute), since the O(all-vertices) stitch was most of a rebuild. Frame-gap unchanged (the ~30x rebuild FREQUENCY remains -> T3). Visual: no tile-boundary seams; relief reads. 450 tests green.
@@ -27,3 +27,11 @@ changes each frame + on region arrivals. The globe is effectively frozen
 
 _Filled in as each lever lands (analytic normals, incremental LOD diff,
 incremental region, buffer reuse, the sweep)._
+
+**After T3 (incremental LOD diff + hysteresis + on-settle):** frame-gap p50
+**1782 → 150ms (~12×)**, long-task total **86.6s → 11.3s (~8×)**, max frame
+**4089 → 271ms**. The diff builds only split/merged tiles per LOD change (not
+all ~40); region arrivals swap a single tile (pendingUpgrades). Headless
+software-GL still floors the frame time; on real hardware (fast GPU) the now-
+tiny JS makes it smoother still. Visual: refinement correct, no gaps/duplicates/
+seams/thrash. 460 tests green.
