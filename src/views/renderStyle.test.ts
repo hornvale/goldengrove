@@ -34,3 +34,13 @@ test('biomePalette is deterministic and bounded, ordered by biome frequency', ()
     }
   }
 });
+
+test('photoreal and filter styles declare no base or symbol layer', () => {
+  for (const s of STYLES) {
+    if (s.id === 'photoreal' || s.id === 'cel' || s.id === 'engraving' || s.id === 'watercolor') {
+      expect(s.base).toBeUndefined();
+      expect(s.symbolLayer).toBeUndefined();
+    }
+  }
+  expect(photorealStyle.base).toBeUndefined();
+});

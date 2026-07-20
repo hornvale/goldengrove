@@ -8,6 +8,22 @@ import { celStyle } from './styles/cel';
 import { engravingStyle } from './styles/engraving';
 import { watercolorStyle } from './styles/watercolor';
 
+/** How the globe SURFACE is shaded, as a per-vertex colour transform applied
+ * on top of the active lens's colour inside globe.ts's computeBaseColor.
+ * Absent on a style = today's realistic relief surface, untouched. */
+export interface BaseTreatment {
+  id: string;
+  /** rgb is 0–255 (the lens output). Return 0–255. `src`/`idx` give the
+   * treatment the raw datum (e.g. src.ocean[idx]) so it shades from data. */
+  transform(rgb: readonly [number, number, number], src: TilesScene, idx: number): [number, number, number];
+}
+
+/** A scene-graph layer of derived-feature symbols. A later task fills in the
+ * builder; this task only reserves the slot. */
+export interface SymbolLayerSpec {
+  id: string;
+}
+
 /** A render STYLE: how the globe is drawn, orthogonal to the data lens (which
  * chooses what data is coloured). A style is a chain of screen-space passes
  * applied to the rendered globe frame. Photoreal is the identity (no passes). */
@@ -20,6 +36,10 @@ export interface RenderStyle {
    * passed so a style can derive a cheap CPU-side hook (e.g. a palette from the
    * world's biome mix) once at construction. */
   passes(tiles: TilesScene): Pass[];
+  /** How the globe surface is shaded. Absent = realistic relief (today). */
+  base?: BaseTreatment;
+  /** A layer of derived-feature symbols mounted on the globe. Absent = none. */
+  symbolLayer?: SymbolLayerSpec;
 }
 
 /** The default: no effect — the globe renders exactly as it does today. */
