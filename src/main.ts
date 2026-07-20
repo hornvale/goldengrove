@@ -27,6 +27,11 @@ import { defaultAppState, parseAppState, seedError, serializeAppState, type AppS
 import { randomSeed } from './ui/seed';
 import type { WorkerErrorKind } from './sim/worker';
 
+// Build stamp (vite.config.ts `define`) — the first line in the console on every
+// load, so a rebuilt bundle is unmistakable through layered caching. If this
+// time is stale, you're seeing a cached build, not the rebuild.
+console.log(`%c[orrery] build ${__BUILD_STAMP__}`, 'font-weight:bold;color:#7aa2c8');
+
 const app = document.getElementById('app')!;
 
 const SPACE_CAPTION =
