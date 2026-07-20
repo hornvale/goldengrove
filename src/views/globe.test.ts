@@ -6,6 +6,8 @@ import {
   RELIEF_EXAGGERATION,
   clusterFeatures,
   createGlobeView,
+  diffTileSets,
+  gateRefinement,
   onNearSide,
   sampleTile,
   seasonalSpinZ,
@@ -13,7 +15,7 @@ import {
   tileIndexOfVertex,
 } from './globe';
 import { REFERENCE_RADIUS_M } from './worldMesh';
-import { TILE_QUADS } from './cubeSphere';
+import { TILE_QUADS, children, tileKey, type TileId } from './cubeSphere';
 import { iceFraction } from './ice';
 import { rotationPhase } from '../sim/ephemeris';
 import type { SystemScene, TilesScene } from '../sim/scene';
@@ -21,6 +23,55 @@ import { loadSeed42Tiles, loadSeed42System } from '../testHelpers/wasmFixture';
 import { moistureLens, naturalLens, temperatureLens } from './lens';
 
 const TAU = Math.PI * 2;
+
+test('diffTileSets: unchanged tiles are kept, neither added nor removed', () => {
+  const a: TileId = { face: 0, level: 1, ix: 0, iy: 0 };
+  const b: TileId = { face: 0, level: 1, ix: 1, iy: 0 };
+  const prevKeys = new Set([tileKey(a), tileKey(b)]);
+  const { added, removed, keptCount } = diffTileSets(prevKeys, [a, b]);
+  expect(added).toEqual([]);
+  expect(removed).toEqual([]);
+  expect(keptCount).toBe(2);
+});
+
+test('diffTileSets: a mixed before/after — kept, a split (1→4), and a merge (4→1)', () => {
+  const kept: TileId = { face: 0, level: 1, ix: 0, iy: 0 };
+  // One tile splits into its four children.
+  const splitParent: TileId = { face: 1, level: 1, ix: 0, iy: 0 };
+  const splitKids = children(splitParent);
+  // Four sibling tiles merge back into their shared parent.
+  const mergedParent: TileId = { face: 2, level: 1, ix: 0, iy: 0 };
+  const mergeKids = children(mergedParent);
+
+  const prev = [kept, splitParent, ...mergeKids];
+  const next = [kept, ...splitKids, mergedParent];
+  const prevKeys = new Set(prev.map(tileKey));
+
+  const { added, removed, keptCount } = diffTileSets(prevKeys, next);
+
+  expect(keptCount).toBe(1);
+  expect(added.length).toBe(4 + 1); // the split's 4 children + the merge's 1 parent
+  expect(removed.length).toBe(1 + 4); // the split's 1 parent + the merge's 4 children
+  expect(new Set(added.map(tileKey))).toEqual(new Set([...splitKids.map(tileKey), tileKey(mergedParent)]));
+  expect(new Set(removed)).toEqual(new Set([tileKey(splitParent), ...mergeKids.map(tileKey)]));
+});
+
+test('gateRefinement holds a refining split back at the current coarser tile', () => {
+  const coarse: TileId = { face: 0, level: 1, ix: 0, iy: 0 };
+  const finer = children(coarse); // the target wants to split into these 4
+  expect(gateRefinement([coarse], finer)).toEqual([coarse]);
+});
+
+test('gateRefinement lets a coarsening merge through immediately', () => {
+  const parentTile: TileId = { face: 0, level: 1, ix: 0, iy: 0 };
+  const kids = children(parentTile); // currently shown split
+  expect(gateRefinement(kids, [parentTile])).toEqual([parentTile]); // target wants to merge
+});
+
+test('gateRefinement passes an unchanged tile through untouched', () => {
+  const t: TileId = { face: 3, level: 2, ix: 1, iy: 1 };
+  expect(gateRefinement([t], [t])).toEqual([t]);
+});
 
 test('sampleTile maps lat/lon to the row-major equirect lattice', () => {
   // 4×2 lattice: row 0 is lat +90..0, col 0 is lon -180.

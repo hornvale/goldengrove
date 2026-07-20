@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  LOD_MAX_LEVEL, LOD_MIN_LEVEL, TILE_QUADS, children, containingTile, faceUnit,
-  globeLodLevel, maxLevel, parent, selectTiles,
-  tileCenterUnit, tileEdgeLenM, tileGrid, tileKey, unitLatLon, type TileId,
+  LOD_MAX_LEVEL, LOD_MERGE_FACTOR, LOD_MIN_LEVEL, LOD_SPLIT_FACTOR, TILE_QUADS,
+  children, containingTile, faceUnit,
+  globeLodLevel, maxLevel, parent, selectTiles, splitAncestorKeys,
+  tileCenterUnit, tileEdgeLenM, tileGrid, tileKey, unitLatLon, type TileId, type V3,
 } from './cubeSphere';
 
 describe('cubeSphere addressing', () => {
@@ -126,5 +127,68 @@ describe('selectTiles (CDLOD)', () => {
   it('never exceeds maxLevel', () => {
     const t = selectTiles([r * 1.001, 0, 0], r, 3, 2);
     expect(Math.max(...t.map((x) => x.level))).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('LOD hysteresis', () => {
+  const r = 2;
+
+  it('splitAncestorKeys marks every strict ancestor of a leaf, never the leaf itself', () => {
+    const leaf: TileId = { face: 0, level: 2, ix: 1, iy: 1 };
+    const keys = splitAncestorKeys([leaf]);
+    expect(keys.has(tileKey(leaf))).toBe(false);
+    const p1 = parent(leaf)!;
+    const p0 = parent(p1)!;
+    expect(keys.has(tileKey(p1))).toBe(true);
+    expect(keys.has(tileKey(p0))).toBe(true);
+  });
+
+  it('splitAncestorKeys walks each shared ancestor chain once (dedup across leaves)', () => {
+    const faceRoot: TileId = { face: 0, level: 0, ix: 0, iy: 0 };
+    const leaves = children(faceRoot); // 4 siblings sharing the same one ancestor
+    const keys = splitAncestorKeys(leaves);
+    expect(keys.size).toBe(1);
+    expect(keys.has(tileKey(faceRoot))).toBe(true);
+  });
+
+  it('a previously-split tile stays subdivided past the plain split threshold (no thrash)', () => {
+    // A camera sitting strictly between splitFactor·edge and mergeFactor·edge:
+    // a tile that has never split stays coarse here (its ordinary threshold
+    // is behind it); a tile that WAS split last frame must not merge back
+    // yet (its threshold is the wider mergeFactor, still ahead of it).
+    const faceRoot: TileId = { face: 0, level: 0, ix: 0, iy: 0 };
+    const edge0 = tileEdgeLenM(0, r);
+    const dist = ((LOD_SPLIT_FACTOR + LOD_MERGE_FACTOR) / 2) * edge0;
+    const camPos: V3 = [r + dist, 0, 0]; // face 0's center is at [r,0,0]
+
+    const fresh = selectTiles(camPos, r, LOD_SPLIT_FACTOR, 4, 0);
+    expect(fresh.some((t) => t.face === 0 && t.level === 0)).toBe(true); // merged/never-split: coarse
+
+    const splitAncestors = splitAncestorKeys(children(faceRoot)); // face 0 was split last frame
+    const held = selectTiles(camPos, r, LOD_SPLIT_FACTOR, 4, 0, { mergeFactor: LOD_MERGE_FACTOR, splitAncestors });
+    expect(held.some((t) => t.face === 0 && t.level === 0)).toBe(false); // held split, no thrash
+    expect(held.some((t) => t.face === 0 && t.level === 1)).toBe(true);
+  });
+
+  it('an empty splitAncestors set behaves exactly like no hysteresis at all', () => {
+    const edge0 = tileEdgeLenM(0, r);
+    const dist = ((LOD_SPLIT_FACTOR + LOD_MERGE_FACTOR) / 2) * edge0;
+    const camPos: V3 = [r + dist, 0, 0];
+    const plain = selectTiles(camPos, r, LOD_SPLIT_FACTOR, 4, 0);
+    const withEmptyHysteresis = selectTiles(camPos, r, LOD_SPLIT_FACTOR, 4, 0, {
+      mergeFactor: LOD_MERGE_FACTOR,
+      splitAncestors: new Set<string>(),
+    });
+    expect(withEmptyHysteresis.map(tileKey).sort()).toEqual(plain.map(tileKey).sort());
+  });
+
+  it('past the merge threshold, a previously-split tile merges back too', () => {
+    const faceRoot: TileId = { face: 0, level: 0, ix: 0, iy: 0 };
+    const edge0 = tileEdgeLenM(0, r);
+    const dist = (LOD_MERGE_FACTOR + 0.5) * edge0; // well past even the wider threshold
+    const camPos: V3 = [r + dist, 0, 0];
+    const splitAncestors = splitAncestorKeys(children(faceRoot));
+    const merged = selectTiles(camPos, r, LOD_SPLIT_FACTOR, 4, 0, { mergeFactor: LOD_MERGE_FACTOR, splitAncestors });
+    expect(merged.some((t) => t.face === 0 && t.level === 0)).toBe(true);
   });
 });

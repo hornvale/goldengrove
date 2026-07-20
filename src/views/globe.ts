@@ -21,10 +21,13 @@ import type { Lens } from './lens';
 import { naturalLens } from './lens';
 import {
   LOD_CDLOD_MAX_LEVEL,
+  LOD_MERGE_FACTOR,
   LOD_MIN_LEVEL,
   LOD_SPLIT_FACTOR,
   TILE_QUADS,
+  parent as parentTile,
   selectTiles,
+  splitAncestorKeys,
   tileGrid,
   tileKey,
   type TileId,
@@ -301,6 +304,74 @@ export interface GlobeView {
   setDayHold(on: boolean): void;
 }
 
+/** Diff two tile-leaf sets by key: `added` are `next` tiles whose key was not
+ * in `prevKeys` (a fresh split's new children, or a fresh merge's new
+ * parent), `removed` are `prevKeys` not present in `next` (the tiles that
+ * just went away), `keptCount` is how many tiles are unchanged. Pure — no
+ * scene-graph access — so the incremental LOD path (`reselect`/`applyTileSet`
+ * below) can dispose only `removed`, build only `added`, and leave every kept
+ * tile's mesh/geometry/colours completely untouched. */
+export function diffTileSets(
+  prevKeys: Set<string>,
+  next: TileId[],
+): { added: TileId[]; removed: string[]; keptCount: number } {
+  const nextKeys = new Set<string>();
+  const added: TileId[] = [];
+  let keptCount = 0;
+  for (const t of next) {
+    const key = tileKey(t);
+    nextKeys.add(key);
+    if (prevKeys.has(key)) keptCount++;
+    else added.push(t);
+  }
+  const removed: string[] = [];
+  for (const key of prevKeys) {
+    if (!nextKeys.has(key)) removed.push(key);
+  }
+  return { added, removed, keptCount };
+}
+
+/** The tile in `currentByKey` (a previous leaf selection, keyed by
+ * `tileKey`) that covers `t`'s position at-or-coarser-than `t`'s own level:
+ * `t` itself if it was already a leaf, else the nearest ancestor that was —
+ * walking up the quadtree until a hit or the root. `null` only if `t`'s
+ * position was previously covered by FINER tiles (a coarsening region), where
+ * no ancestor-or-self of `t` was ever a leaf. */
+function coveringLeaf(t: TileId, currentByKey: Map<string, TileId>): TileId | null {
+  let cur: TileId | null = t;
+  while (cur) {
+    const hit = currentByKey.get(tileKey(cur));
+    if (hit) return hit;
+    cur = parentTile(cur);
+  }
+  return null;
+}
+
+/** On-settle refinement: while the camera is still moving, hold `target`'s
+ * *refining* changes (splits — a tile going finer than it currently is) back
+ * at their current coarser tile, but let its *coarsening* changes (merges —
+ * always cheap, and camera-out is exactly when detail should drop) through
+ * immediately. Pure — `currentLeaves`/`target` are both plain leaf-set
+ * snapshots. A target leaf whose position was already at-or-coarser-than its
+ * covering current tile passes through unchanged; a would-be-finer leaf is
+ * replaced by its covering (coarser) current tile, deduplicated so the
+ * result stays a valid non-overlapping leaf set. */
+export function gateRefinement(currentLeaves: TileId[], target: TileId[]): TileId[] {
+  const currentByKey = new Map(currentLeaves.map((t) => [tileKey(t), t] as const));
+  const out: TileId[] = [];
+  const usedKeys = new Set<string>();
+  for (const t of target) {
+    const cover = coveringLeaf(t, currentByKey);
+    const chosen = cover !== null && cover.level < t.level ? cover : t;
+    const key = tileKey(chosen);
+    if (!usedKeys.has(key)) {
+      out.push(chosen);
+      usedKeys.add(key);
+    }
+  }
+  return out;
+}
+
 /** Build the globe view: a cube-sphere mesh displaced by real relief,
  * colored by ocean depth or biome, carrying settlement markers, and lit by a
  * fixed-direction "sun" whose latitude tracks the season while the mesh
@@ -347,13 +418,6 @@ export function createGlobeView(
   let reliefOn = false; // true-relief (1×) vs schematic (RELIEF_EXAGGERATION×)
   const reliefScale = (): number => (reliefOn ? 1 : RELIEF_EXAGGERATION);
 
-  let tileMeshes: THREE.Mesh[] = [];
-  let tileGeoms: THREE.BufferGeometry[] = [];
-  // Per-tile colour SOURCE: the base tiles document, or (cast) a region patch
-  // — its own per-node fields carry the same names the lens reads.
-  // `tileIdxByTile[t]` indexes into it: the base tileIndex map for base tiles,
-  // identity for region tiles (a node's index IS its colour index).
-  let tileColorSrc: TilesScene[] = [];
   // Region patches (true higher-res terrain) for the deep near tiles: cached
   // by tile key, requested async through the worker. Gated to spinning worlds
   // (the locked-temperature lens needs width/height a region patch lacks).
@@ -365,14 +429,30 @@ export function createGlobeView(
   // A region tile's colour index is just its node index (0..n²-1) — one shared
   // identity map for all region tiles (read-only in the repaint).
   const identityIdx = Int32Array.from({ length: tileGridN * tileGridN }, (_, i) => i);
-  // Per-vertex tile-index cache, one Int32Array per tile: a living lens
-  // (temperature) or ice recolours per frame, so `repaint` reuses this rather
-  // than re-deriving lat/lon → tile per vertex per tick.
-  let tileIdxByTile: Int32Array[] = [];
-  // The active lens's static colours per tile, rebuilt on `setLens`/`buildTiles`.
-  // For a living lens this is the day-0 snapshot, overwritten per repaint; for
-  // a static one it IS the final colour (modulo the ice blend).
-  let baseColorByTile: Float32Array[] = [];
+  // A region that arrived for a tile still shown as a base tile (its key is
+  // otherwise unchanged, so the incremental diff below would never touch it):
+  // `onRegion` marks it here, and the next `reselect` upgrades it in place.
+  const pendingUpgrades = new Set<string>();
+
+  /** One rendered tile's complete state: the mesh mounted in `spinGroup`, its
+   * geometry, the per-vertex tile-index cache (`idx`: the base `tileIndex`
+   * map for a base tile, `identityIdx` for a region tile — a node's index IS
+   * its colour index there), the colour SOURCE (`tiles` or, cast, a region
+   * patch — its own per-node fields carry the same names the lens reads), and
+   * `baseColor` (the active lens's static per-vertex colour, rebuilt on
+   * `setLens`; for a living lens this is the day-0 snapshot `repaint`
+   * overwrites, for a static one it IS the final colour modulo the ice
+   * blend). Keyed by `tileKey` in `tileSlots` below — the incremental LOD
+   * diff disposes/builds individual slots instead of the whole set. */
+  interface TileSlot {
+    id: TileId;
+    mesh: THREE.Mesh;
+    geom: THREE.BufferGeometry;
+    idx: Int32Array;
+    colorSrc: TilesScene;
+    baseColor: Float32Array;
+  }
+  const tileSlots = new Map<string, TileSlot>();
 
   /** The 6·4^level tiles of a uniform level, row-major per face. */
   function tilesAtLevel(level: number): TileId[] {
@@ -386,18 +466,22 @@ export function createGlobeView(
     return out;
   }
 
+  function computeBaseColor(idx: Int32Array, src: TilesScene): Float32Array {
+    const buf = new Float32Array(idx.length * 3);
+    for (let v = 0; v < idx.length; v++) {
+      const rgb = activeLens.colorAt(src, idx[v]!, lastDay ?? 0, seasonalCtx);
+      buf[3 * v] = rgb[0] / 255;
+      buf[3 * v + 1] = rgb[1] / 255;
+      buf[3 * v + 2] = rgb[2] / 255;
+    }
+    return buf;
+  }
+
+  /** Recompute every mounted slot's `baseColor` for the (just-changed)
+   * active lens — the per-slot counterpart of the old whole-set rebuild,
+   * called from `setLens`. */
   function rebuildBase(): void {
-    baseColorByTile = tileIdxByTile.map((idx, ti) => {
-      const src = tileColorSrc[ti]!;
-      const buf = new Float32Array(idx.length * 3);
-      for (let v = 0; v < idx.length; v++) {
-        const rgb = activeLens.colorAt(src, idx[v]!, lastDay ?? 0, seasonalCtx);
-        buf[3 * v] = rgb[0] / 255;
-        buf[3 * v + 1] = rgb[1] / 255;
-        buf[3 * v + 2] = rgb[2] / 255;
-      }
-      return buf;
-    });
+    for (const slot of tileSlots.values()) slot.baseColor = computeBaseColor(slot.idx, slot.colorSrc);
   }
 
   // A skirt deep enough to cover the worst crack at a mixed-LOD boundary: the
@@ -410,104 +494,99 @@ export function createGlobeView(
   const signatureOf = (set: TileId[]): string => set.map(tileKey).join('|');
   let currentSignature = '';
 
-  /** (Re)build the surface as the given leaf tiles (varying CDLOD levels):
-   * swap the meshes into `spinGroup`, recompute the per-vertex tile-index cache
-   * and base colours, stitch the same-level seams, and repaint. Each tile gets
-   * a skirt so a coarser neighbour's crack is filled. Runs only when the set
-   * changes (a few times across a zoom), not per frame. */
-  function buildTiles(selected: TileId[]): void {
-    for (const m of tileMeshes) {
-      spinGroup.remove(m);
-      m.geometry.dispose();
-    }
-    tileMeshes = [];
-    tileGeoms = [];
-    tileIdxByTile = [];
-    tileColorSrc = [];
-    const scale = reliefScale();
+  /** Build one tile's complete slot at `scale`: base data or (once cached) a
+   * region patch, mounted into `spinGroup`. Does not touch any other slot —
+   * this is the unit the incremental diff below adds/removes one of at a
+   * time, instead of the old whole-set rebuild. */
+  function buildTileSlot(t: TileId, scale: number): TileSlot {
+    const key = tileKey(t);
     const skirt = skirtDepthFor(scale);
-    for (const t of selected) {
-      const key = tileKey(t);
-      const wantsRegion = regionsEnabled && t.level >= REGION_MIN_LEVEL;
-      const region = wantsRegion ? regionCache.get(key) : undefined;
-      let geom: THREE.BufferGeometry;
-      if (region) {
-        // True higher-res terrain, coloured by the lens on the region's own
-        // nodes (RegionScene carries the fields colorAt reads).
-        geom = buildRegionTileGeometry(
-          region,
-          GLOBE_RADIUS,
-          scale,
-          (node) => activeLens.colorAt(region as unknown as TilesScene, node, lastDay ?? 0, seasonalCtx),
-          skirt,
-        );
-        tileColorSrc.push(region as unknown as TilesScene);
-        tileIdxByTile.push(identityIdx);
-      } else {
-        geom = buildTileGeometry(tiles, t, GLOBE_RADIUS, scale, colorAt, skirt);
-        tileColorSrc.push(tiles);
-        const grid = tileGrid(t);
-        // Only the surface vertices (n×n) are lens-recoloured; the skirt copies
-        // its edge vertex's colour at build time and is never a data surface.
-        const idx = new Int32Array(tileGridN * tileGridN);
-        for (let i = 0; i < idx.length; i++) idx[i] = tileIndex(tiles, grid.lats[i]!, grid.lons[i]!);
-        tileIdxByTile.push(idx);
-        // Ask for the region if it would sharpen this tile and isn't in flight.
-        if (wantsRegion && !regionPending.has(key)) {
-          regionPending.add(key);
-          requestRegion!(t);
-        }
+    const wantsRegion = regionsEnabled && t.level >= REGION_MIN_LEVEL;
+    const region = wantsRegion ? regionCache.get(key) : undefined;
+    let geom: THREE.BufferGeometry;
+    let colorSrc: TilesScene;
+    let idx: Int32Array;
+    if (region) {
+      // True higher-res terrain, coloured by the lens on the region's own
+      // nodes (RegionScene carries the fields colorAt reads).
+      geom = buildRegionTileGeometry(
+        region,
+        GLOBE_RADIUS,
+        scale,
+        (node) => activeLens.colorAt(region as unknown as TilesScene, node, lastDay ?? 0, seasonalCtx),
+        skirt,
+      );
+      colorSrc = region as unknown as TilesScene;
+      idx = identityIdx;
+    } else {
+      geom = buildTileGeometry(tiles, t, GLOBE_RADIUS, scale, colorAt, skirt);
+      colorSrc = tiles;
+      const grid = tileGrid(t);
+      // Only the surface vertices (n×n) are lens-recoloured; the skirt copies
+      // its edge vertex's colour at build time and is never a data surface.
+      idx = new Int32Array(tileGridN * tileGridN);
+      for (let i = 0; i < idx.length; i++) idx[i] = tileIndex(tiles, grid.lats[i]!, grid.lons[i]!);
+      // Ask for the region if it would sharpen this tile and isn't in flight.
+      if (wantsRegion && !regionPending.has(key)) {
+        regionPending.add(key);
+        requestRegion!(t);
       }
-      const mesh = new THREE.Mesh(geom, material);
-      mesh.name = `globe-tile-${key}`;
-      spinGroup.add(mesh);
-      tileMeshes.push(mesh);
-      tileGeoms.push(geom);
     }
-    // Same-level neighbours share exact edge vertices; their normals already
-    // agree by construction (`worldMesh.ts`'s analytic normal is a pure
-    // function of (lat, lon) + the field, so no post-hoc stitch is needed
-    // here anymore). Skirts still cover the *positional* cracks at
-    // mixed-level boundaries.
-    rebuildBase();
-    repaint(lastDay ?? 0, true);
-    currentSelected = selected;
-    currentSignature = signatureOf(selected);
-  }
-  // Initial coarse set (the data-matching base level); the camera refines it.
-  buildTiles(tilesAtLevel(LOD_MIN_LEVEL));
-
-  const localCam = new THREE.Vector3(); // reselect scratch — no per-frame alloc
-  const spinZAxis = new THREE.Vector3(0, 0, 1);
-  /** Per-tile CDLOD: transform the camera into the spinning globe's local
-   * frame (the tiles live under `spinGroup`, rotated by rotation.z), select the
-   * leaf-tile set for that closeness, and rebuild only if it changed. */
-  function reselect(camera: THREE.Camera): void {
-    localCam.copy(camera.position).applyAxisAngle(spinZAxis, -spinGroup.rotation.z);
-    const selected = selectTiles(
-      [localCam.x, localCam.y, localCam.z],
-      GLOBE_RADIUS,
-      LOD_SPLIT_FACTOR,
-      LOD_CDLOD_MAX_LEVEL,
-      LOD_MIN_LEVEL,
-    );
-    if (signatureOf(selected) !== currentSignature) buildTiles(selected);
+    const mesh = new THREE.Mesh(geom, material);
+    mesh.name = `globe-tile-${key}`;
+    spinGroup.add(mesh);
+    return { id: t, mesh, geom, idx, colorSrc, baseColor: computeBaseColor(idx, colorSrc) };
   }
 
-  function onRegion(key: string, region: RegionScene): void {
-    regionPending.delete(key);
-    regionCache.set(key, region);
-    // Invalidate the signature so the next frame's reselect rebuilds the same
-    // set — now with this region cached, the tile builds from true detail.
-    // Naturally debounced: many arrivals before the next frame → one rebuild.
-    currentSignature = '';
+  /** Dispose+unmount one slot, if present. The other half of `buildTileSlot`
+   * — together these are the whole incremental unit (no global stitch: T2's
+   * analytic normals already made same-level neighbours agree by
+   * construction, so one tile's geometry never depends on another's). */
+  function disposeSlot(key: string): void {
+    const slot = tileSlots.get(key);
+    if (!slot) return;
+    spinGroup.remove(slot.mesh);
+    slot.geom.dispose();
+    tileSlots.delete(key);
   }
 
-  /** Repaints the current tile set for `day`: the active lens's colour per
+  /** Paint one slot's vertex colours for `day`: the active lens (living or
+   * `slot.baseColor`'s snapshot), ice-blended only under `natural`. Shared by
+   * the full `repaint` below and the incremental path's targeted repaint of
+   * just-built slots. */
+  function paintSlot(slot: TileSlot, day: number, icy: boolean): void {
+    const color = slot.geom.getAttribute('color') as THREE.BufferAttribute;
+    const idx = slot.idx;
+    const base = slot.baseColor;
+    const src = slot.colorSrc;
+    for (let v = 0; v < idx.length; v++) {
+      let r: number, g: number, b: number;
+      if (activeLens.dependsOnDay) {
+        const rgb = activeLens.colorAt(src, idx[v]!, day, seasonalCtx);
+        r = rgb[0] / 255;
+        g = rgb[1] / 255;
+        b = rgb[2] / 255;
+      } else {
+        r = base[3 * v]!;
+        g = base[3 * v + 1]!;
+        b = base[3 * v + 2]!;
+      }
+      if (icy) {
+        const frac = iceFraction(src, idx[v]!, day, seasonalCtx);
+        r += (ICE_COLOR[0] - r) * frac;
+        g += (ICE_COLOR[1] - g) * frac;
+        b += (ICE_COLOR[2] - b) * frac;
+      }
+      color.setXYZ(v, r, g, b);
+    }
+    color.needsUpdate = true;
+  }
+
+  /** Repaints every mounted slot for `day`: the active lens's colour per
    * vertex, blended toward `ICE_COLOR` only under `natural` (a data lens must
    * show its data, not decorative ice — the blend would corrupt its colormap).
    * Repaints only when the day actually moved, or when forced (a lens swap or
-   * a fresh tile rebuild). A static, non-natural lens (no ice, no day
+   * a full tile rebuild). A static, non-natural lens (no ice, no day
    * dependency) repaints once and never again. */
   function repaint(day: number, force = false): void {
     const still = !activeLens.dependsOnDay && activeLens.id !== naturalLens.id;
@@ -515,33 +594,130 @@ export function createGlobeView(
     if (!force && still && lastDay !== null) return;
     lastDay = day;
     const icy = activeLens.id === naturalLens.id;
-    for (let ti = 0; ti < tileGeoms.length; ti++) {
-      const color = tileGeoms[ti]!.getAttribute('color') as THREE.BufferAttribute;
-      const idx = tileIdxByTile[ti]!;
-      const base = baseColorByTile[ti]!;
-      const src = tileColorSrc[ti]!; // base tiles or a region patch
-      for (let v = 0; v < idx.length; v++) {
-        let r: number, g: number, b: number;
-        if (activeLens.dependsOnDay) {
-          const rgb = activeLens.colorAt(src, idx[v]!, day, seasonalCtx);
-          r = rgb[0] / 255;
-          g = rgb[1] / 255;
-          b = rgb[2] / 255;
-        } else {
-          r = base[3 * v]!;
-          g = base[3 * v + 1]!;
-          b = base[3 * v + 2]!;
-        }
-        if (icy) {
-          const frac = iceFraction(src, idx[v]!, day, seasonalCtx);
-          r += (ICE_COLOR[0] - r) * frac;
-          g += (ICE_COLOR[1] - g) * frac;
-          b += (ICE_COLOR[2] - b) * frac;
-        }
-        color.setXYZ(v, r, g, b);
-      }
-      color.needsUpdate = true;
+    for (const slot of tileSlots.values()) paintSlot(slot, day, icy);
+  }
+
+  /** Repaint only the given (already-built) slots at the last-committed day
+   * — used right after the incremental diff adds/upgrades tiles, so they
+   * pick up the ice blend and any living-lens colour without touching (or
+   * even visiting) every other tile already on screen. */
+  function repaintSlots(keys: string[]): void {
+    const day = lastDay ?? 0;
+    const icy = activeLens.id === naturalLens.id;
+    for (const key of keys) {
+      const slot = tileSlots.get(key);
+      if (slot) paintSlot(slot, day, icy);
     }
+  }
+
+  /** Full rebuild: dispose every mounted slot and build the given leaf set
+   * from scratch. Reserved for the whole-globe events where every tile's
+   * geometry must change regardless of the LOD diff — the initial mount and
+   * a relief-scale toggle (`setTrueRelief`) — never the per-frame LOD path
+   * (`applyTileSet` below, the one the incremental diff/harness covers). */
+  function rebuildAllTiles(selected: TileId[]): void {
+    for (const key of [...tileSlots.keys()]) disposeSlot(key);
+    const scale = reliefScale();
+    for (const t of selected) tileSlots.set(tileKey(t), buildTileSlot(t, scale));
+    currentSelected = selected;
+    currentSignature = signatureOf(selected);
+    repaint(lastDay ?? 0, true);
+  }
+  // Initial coarse set (the data-matching base level); the camera refines it.
+  rebuildAllTiles(tilesAtLevel(LOD_MIN_LEVEL));
+
+  /** Apply a new leaf-tile selection incrementally: diff it against the
+   * mounted slots (`diffTileSets`), dispose only `removed`, build only
+   * `added` — every kept tile's mesh/geometry/colours are left completely
+   * untouched (no global stitch needed since T2). Also upgrades any mounted
+   * base tile whose region just arrived (`pendingUpgrades`), even though its
+   * key is unchanged and the diff alone would never touch it. This is the
+   * O(diff) path the harness's `__btCount`/`__btMs` counters below measure —
+   * `reselect` calls it once per leaf-set change (a handful of times across a
+   * zoom), never per frame. */
+  function applyTileSet(selected: TileId[]): void {
+    const t0 = performance.now();
+    const { added, removed } = diffTileSets(new Set(tileSlots.keys()), selected);
+    for (const key of removed) disposeSlot(key);
+    const scale = reliefScale();
+    const toBuild = [...added];
+    const buildKeys = new Set(added.map((t) => tileKey(t)));
+    if (pendingUpgrades.size > 0) {
+      for (const t of selected) {
+        const key = tileKey(t);
+        if (pendingUpgrades.has(key) && tileSlots.has(key) && !buildKeys.has(key)) {
+          toBuild.push(t);
+          buildKeys.add(key);
+        }
+      }
+      pendingUpgrades.clear();
+    }
+    const builtKeys: string[] = [];
+    for (const t of toBuild) {
+      const key = tileKey(t);
+      disposeSlot(key); // no-op unless this is a base→region upgrade in place
+      tileSlots.set(key, buildTileSlot(t, scale));
+      builtKeys.push(key);
+    }
+    currentSelected = selected;
+    currentSignature = signatureOf(selected);
+    if (builtKeys.length > 0) repaintSlots(builtKeys);
+    const g = globalThis as { __btCount?: number; __btMs?: number };
+    g.__btCount = (g.__btCount ?? 0) + 1;
+    g.__btMs = (g.__btMs ?? 0) + (performance.now() - t0);
+  }
+
+  // On-settle refinement (spec §2, Nathan-approved): while the camera moved
+  // more than SETTLE_EPSILON since last frame, `reselect` defers *refining*
+  // changes (a split — going finer) via `gateRefinement`, holding the current
+  // coarser tile instead; *coarsening* (merging on zoom-out) is always cheap
+  // and applied immediately either way. Refinement resumes once motion has
+  // been below the epsilon for SETTLE_FRAMES_NEEDED consecutive frames — "a
+  // frame or two", so a fling holds its detail steady instead of rebuilding
+  // every frame it's in flight. Both constants are tunable; the controller's
+  // visual pass confirms the feel (a lag that reads as sluggish vs one that
+  // reads as settling).
+  const SETTLE_EPSILON = GLOBE_RADIUS * 0.0015;
+  const SETTLE_FRAMES_NEEDED = 2;
+  let prevCamLocal: THREE.Vector3 | null = null;
+  let settledFrames = 0;
+
+  const localCam = new THREE.Vector3(); // reselect scratch — no per-frame alloc
+  const spinZAxis = new THREE.Vector3(0, 0, 1);
+  /** Per-tile CDLOD: transform the camera into the spinning globe's local
+   * frame (the tiles live under `spinGroup`, rotated by rotation.z), select
+   * the leaf-tile set for that closeness (with merge hysteresis against the
+   * last-applied set), gate refinement while the camera is still moving, and
+   * apply the result incrementally only if it actually changed. */
+  function reselect(camera: THREE.Camera): void {
+    localCam.copy(camera.position).applyAxisAngle(spinZAxis, -spinGroup.rotation.z);
+    const moved = prevCamLocal === null || localCam.distanceTo(prevCamLocal) > SETTLE_EPSILON;
+    settledFrames = moved ? 0 : settledFrames + 1;
+    if (prevCamLocal === null) prevCamLocal = localCam.clone();
+    else prevCamLocal.copy(localCam);
+
+    const target = selectTiles(
+      [localCam.x, localCam.y, localCam.z],
+      GLOBE_RADIUS,
+      LOD_SPLIT_FACTOR,
+      LOD_CDLOD_MAX_LEVEL,
+      LOD_MIN_LEVEL,
+      { mergeFactor: LOD_MERGE_FACTOR, splitAncestors: splitAncestorKeys(currentSelected) },
+    );
+    const settled = settledFrames >= SETTLE_FRAMES_NEEDED;
+    const selected = settled ? target : gateRefinement(currentSelected, target);
+    if (signatureOf(selected) !== currentSignature || pendingUpgrades.size > 0) applyTileSet(selected);
+  }
+
+  function onRegion(key: string, region: RegionScene): void {
+    regionPending.delete(key);
+    regionCache.set(key, region);
+    // The tile at `key` may currently be mounted as a base-data slot (same
+    // key either way — the leaf selection didn't change) — mark it so the
+    // next `reselect` upgrades that one slot to the now-cached region detail,
+    // without a full rebuild. Naturally debounced: several arrivals before
+    // the next frame still cost one upgrade each, not a wholesale rebuild.
+    pendingUpgrades.add(key);
   }
 
   function setLens(lens: Lens): void {
@@ -616,7 +792,7 @@ export function createGlobeView(
   function setTrueRelief(on: boolean): void {
     if (on === reliefOn) return;
     reliefOn = on;
-    buildTiles(currentSelected); // same tiles, rebuilt at the new relief scale
+    rebuildAllTiles(currentSelected); // same tiles, rebuilt at the new relief scale
     // The terrain the markers stand on just moved — reseat them on it.
     for (const marker of markers) placeMarker(marker, reliefScale());
     ocean.setTrueRelief(on);

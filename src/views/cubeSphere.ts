@@ -162,6 +162,48 @@ export const LOD_SPLIT_FACTOR = 1.5;
  * sit deeper than the uniform cap without a whole-globe triangle blow-up. */
 export const LOD_CDLOD_MAX_LEVEL = 4;
 
+/** Merge (un-split) hysteresis: a tile that is currently split into its four
+ * children only merges back once the camera drifts out past this multiple
+ * (wider than `LOD_SPLIT_FACTOR`) of the tile's edge length — split at the
+ * near threshold, merge only at the far one. Without this, a camera sitting
+ * right at the split boundary thrashes split→merge→split every frame it
+ * jitters across it (`globe.ts`'s incremental diff would rebuild on every
+ * flip). The ratio is a tunable constant; retune if the visual pass finds the
+ * band too wide (stale coarse tiles lingering) or too narrow (thrash back). */
+export const LOD_MERGE_FACTOR = LOD_SPLIT_FACTOR * 1.5;
+
+/** Hysteresis state for `selectTiles`: `splitAncestors` is the set of
+ * `tileKey`s that were **not** leaves in the previous selection (i.e. tiles
+ * that were split, whose descendants were shown instead) — see
+ * `splitAncestorKeys`. A node found in this set uses `mergeFactor` as its
+ * split/merge threshold instead of the (narrower) `splitFactor` argument. */
+export interface LodHysteresis {
+  mergeFactor: number;
+  splitAncestors: ReadonlySet<string>;
+}
+
+/** The set of `tileKey`s for every tile that was **split** in a previous
+ * selection: every strict ancestor of every leaf in `leaves`. A leaf's own
+ * key is never in this set (it was not split — it WAS the leaf); an ancestor
+ * two levels up is, because both it and its child were subdivided further to
+ * reach the leaf. `selectTiles` reads this to bias the split/merge threshold
+ * per node (see `LodHysteresis`) — pure and cheap (bounded by
+ * leaves × depth), recomputed fresh from the last-applied selection each
+ * frame rather than carried as engine state. */
+export function splitAncestorKeys(leaves: TileId[]): Set<string> {
+  const keys = new Set<string>();
+  for (const leaf of leaves) {
+    let t = parent(leaf);
+    while (t) {
+      const key = tileKey(t);
+      if (keys.has(key)) break; // this ancestor chain already walked via another leaf
+      keys.add(key);
+      t = parent(t);
+    }
+  }
+  return keys;
+}
+
 /** Select the leaf tiles for a camera at `cameraPos` (world units; globe
  * centred at the origin, undisplaced radius `radius`): a quadtree descent from
  * the six level-0 faces that subdivides a tile only while the camera is within
@@ -169,13 +211,16 @@ export const LOD_CDLOD_MAX_LEVEL = 4;
  * below `maxLevel`. Near the camera → fine tiles; the far side stays coarse
  * (level 0), so the detail is paid only where it is seen. Deterministic; call
  * it against the spin-corrected camera and rebuild when the returned set
- * changes. */
+ * changes. `hysteresis`, when given, widens the threshold to `mergeFactor` for
+ * any node that was split last time (see `LodHysteresis`), so a boundary
+ * jitter cannot thrash. */
 export function selectTiles(
   cameraPos: V3,
   radius: number,
   splitFactor = LOD_SPLIT_FACTOR,
   maxLevel = LOD_CDLOD_MAX_LEVEL,
   minLevel = 0,
+  hysteresis?: LodHysteresis,
 ): TileId[] {
   const out: TileId[] = [];
   const [cx, cy, cz] = cameraPos;
@@ -195,7 +240,9 @@ export function selectTiles(
     const dy = cy - c[1] * radius;
     const dz = cz - c[2] * radius;
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (dist < splitFactor * tileEdgeLenM(t.level, radius)) {
+    const wasSplit = hysteresis !== undefined && hysteresis.splitAncestors.has(tileKey(t));
+    const threshold = (wasSplit ? hysteresis!.mergeFactor : splitFactor) * tileEdgeLenM(t.level, radius);
+    if (dist < threshold) {
       for (const child of children(t)) visit(child);
     } else {
       out.push(t);
