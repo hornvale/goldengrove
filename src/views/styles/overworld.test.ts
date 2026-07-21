@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { overworldRGBA, OVERWORLD_PALETTE } from './overworld';
+import { overworldRGBA, OVERWORLD_PALETTE, COAST_BAND_PX, FOAM_BAND_PX } from './overworld';
 import type { RegionScene } from '../../sim/scene';
 
 /** A 2x2-node region (samples=1): node 0 (top-left, row0/col0) is a shallow
@@ -93,24 +93,141 @@ function distinctColors(buf: Uint8Array): Array<[number, number, number]> {
   return Array.from(seen.values());
 }
 
+/** An 8x8-node region (samples=7): the left half of node columns (0-3) is
+ * shallow ocean, the right half (4-7) is a known land biome — a clean
+ * vertical land/water boundary for the coastline tests (Task 3). Enough
+ * nodes per side that the boundary sits away from the texture's own edges,
+ * so out-of-bounds neighbor lookups don't confound the assertions. */
+function splitRegion(biomeName = 'temperate-forest'): RegionScene {
+  const samples = 7;
+  const nodesPerSide = samples + 1; // 8
+  const n = nodesPerSide * nodesPerSide; // 64
+  const ocean: boolean[] = [];
+  const elevation_m: number[] = [];
+  const biome: number[] = [];
+  for (let row = 0; row < nodesPerSide; row++) {
+    for (let col = 0; col < nodesPerSide; col++) {
+      const isOcean = col < nodesPerSide / 2;
+      ocean.push(isOcean);
+      elevation_m.push(isOcean ? -100 : 400);
+      biome.push(0);
+    }
+  }
+  return {
+    schema: 'scene/tiles-region/v1',
+    seed: 1,
+    face: 0,
+    level: 3,
+    ix: 0,
+    iy: 0,
+    samples,
+    sea_level_m: 0,
+    season_period_days: 360,
+    circulationBands: 3,
+    biomeLegend: [biomeName],
+    elevation_m,
+    ocean,
+    biome,
+    plate: Array.from({ length: n }, () => 0),
+    unrest: Array.from({ length: n }, () => 0),
+    t_mean_c: Array.from({ length: n }, () => 10),
+    t_swing_c: Array.from({ length: n }, () => 5),
+    moisture: Array.from({ length: n }, () => 0.5),
+    water: Array.from({ length: n }, () => 0),
+    waterLegend: [],
+    drainage: Array.from({ length: n }, () => 0),
+    waterfalls: [],
+  } as unknown as RegionScene;
+}
+
+/** Whether any pixel in output column `x` of a `dim x dim` RGBA buffer
+ * carries `tone`. */
+function columnContains(buf: Uint8Array, dim: number, x: number, tone: readonly [number, number, number]): boolean {
+  for (let y = 0; y < dim; y++) {
+    if (pixelAt(buf, dim, x, y).join(',') === tone.join(',')) return true;
+  }
+  return false;
+}
+
+describe('overworldRGBA — crafted coastlines', () => {
+  // splitRegion's node grid is 8x8 (samples=7); at dim=32 the ocean/land
+  // node-column boundary (col 3 vs col 4) falls at output column 16 — the
+  // land side of the boundary.
+  const dim = 32;
+  const boundaryCol = 16;
+
+  test('the land-side boundary column carries the outline tone', () => {
+    const region = splitRegion();
+    const buf = overworldRGBA(region, dim);
+    expect(columnContains(buf, dim, boundaryCol, OVERWORLD_PALETTE.outline)).toBe(true);
+  });
+
+  test('water just inside the boundary carries the shallows tone, not open ocean', () => {
+    const region = splitRegion();
+    const buf = overworldRGBA(region, dim);
+    const pixel = pixelAt(buf, dim, boundaryCol - 1, 16);
+    expect(pixel).toEqual(OVERWORLD_PALETTE.shallows);
+    expect(pixel).not.toEqual(OVERWORLD_PALETTE.ocean.shallow);
+    expect(pixel).not.toEqual(OVERWORLD_PALETTE.ocean.deep);
+  });
+
+  test('foam appears somewhere in the water column just outside the outline', () => {
+    const region = splitRegion();
+    const buf = overworldRGBA(region, dim);
+    expect(columnContains(buf, dim, boundaryCol - 1, OVERWORLD_PALETTE.foam)).toBe(true);
+  });
+
+  test('open ocean well away from shore keeps its ordinary depth-dithered tones, no shallows/foam', () => {
+    const region = splitRegion();
+    const buf = overworldRGBA(region, dim);
+    const openOceanCol = boundaryCol - 1 - COAST_BAND_PX - 2; // safely past the shallows band
+    for (let y = 0; y < dim; y++) {
+      const pixel = pixelAt(buf, dim, openOceanCol, y);
+      expect(pixel).not.toEqual(OVERWORLD_PALETTE.shallows);
+      expect(pixel).not.toEqual(OVERWORLD_PALETTE.foam);
+      expect(pixel).not.toEqual(OVERWORLD_PALETTE.outline);
+    }
+  });
+
+  test('land away from the shore is never painted with the outline tone', () => {
+    const region = splitRegion();
+    const buf = overworldRGBA(region, dim);
+    const inlandCol = boundaryCol + 1 + FOAM_BAND_PX + 2; // safely past the boundary column
+    for (let y = 0; y < dim; y++) {
+      expect(pixelAt(buf, dim, inlandCol, y)).not.toEqual(OVERWORLD_PALETTE.outline);
+    }
+  });
+
+  test('is deterministic — identical output for identical input', () => {
+    const region = splitRegion();
+    expect(overworldRGBA(region, dim)).toEqual(overworldRGBA(region, dim));
+  });
+});
+
 describe('overworldRGBA — palette fill', () => {
   test('colors each output pixel by its nearest region node biome', () => {
     const region = miniRegion();
     const buf = overworldRGBA(region, 8); // 8x8 output
     expect(buf.length).toBe(8 * 8 * 4);
+    // Sampled at dim=32 (not 8) so the ocean/land sample points sit well
+    // outside Task 3's coastal band (COAST_BAND_PX) around miniRegion's
+    // single-ocean-node/land boundary — this test is about nearest-node
+    // membership, not the coastline feature (see the dedicated coastline
+    // describe block above).
+    const coastalBuf = overworldRGBA(region, 32);
     // a pixel over the ocean cell (node 0, top-left) is one of the ocean
     // tones — membership, not a specific tone, so this doesn't couple to
     // BAYER_4/OVERWORLD_DITHER_STRENGTH's threshold (Task 5 retunes those);
     // a wrong nearest-node resolution would still land outside this set.
     expect([OVERWORLD_PALETTE.ocean.shallow, OVERWORLD_PALETTE.ocean.deep]).toContainEqual(
-      pixelAt(buf, 8, 1, 1),
+      pixelAt(coastalBuf, 32, 4, 4),
     );
     // a pixel over the forest cells (nodes 1-3) is one of that biome's tones
     // — same membership rationale.
     expect([
       OVERWORLD_PALETTE.biome['temperate-forest']!.light,
       OVERWORLD_PALETTE.biome['temperate-forest']!.dark,
-    ]).toContainEqual(pixelAt(buf, 8, 6, 6));
+    ]).toContainEqual(pixelAt(coastalBuf, 32, 24, 24));
     expect(alphaAt(buf, 8, 4, 4)).toBe(255);
   });
 
@@ -123,8 +240,9 @@ describe('overworldRGBA — palette fill', () => {
     const region = miniRegion({
       elevation_m: [-5000, 500, 500, 500],
     });
-    const buf = overworldRGBA(region, 8);
-    expect(pixelAt(buf, 8, 1, 1)).toEqual(OVERWORLD_PALETTE.ocean.deep);
+    // dim=32, sampled well outside the coastal band — see the comment above.
+    const buf = overworldRGBA(region, 32);
+    expect(pixelAt(buf, 32, 4, 4)).toEqual(OVERWORLD_PALETTE.ocean.deep);
   });
 
   test('an inland river node takes the river tone, distinct from ocean and land', () => {

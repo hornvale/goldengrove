@@ -10,13 +10,19 @@
  * dither also reads as coarse relief shading (higher land leans `light`;
  * ocean elevation is always at or below sea level, so shallower water only
  * reaches a neutral 50/50 split, never a `light`-leaning bias beyond
- * neutral). Later tasks (crafted coastlines, Task 3; biome-boundary
- * outlines, Task 4) layer on top of this same fill — none of those change
- * which class a node resolves to, only how it's painted, so the class
- * resolution below mirrors `pixelBase.ts`'s `pixelColorFor` exactly (same
- * priority: inland water, then ocean depth, then biome name) rather than
- * inventing a second read of the same data. River/lake/shallows/foam/outline
- * tones are NOT dithered (coastlines/outlines are later tasks). The pixel
+ * neutral). Task 3 (this task) adds crafted coastlines: at the land/ocean
+ * boundary, a land pixel with an ocean neighbor within 1px takes a flat
+ * `outline` tone, and an ocean pixel within `COAST_BAND_PX` of land takes
+ * the flat `shallows` tone (its innermost `FOAM_BAND_PX` dithering between
+ * `foam`/`shallows` instead) rather than the open-ocean depth dither —
+ * these coastline tones WIN over the base fill/dither wherever they apply.
+ * Biome-boundary outlines (Task 4) layer on top of this same fill next —
+ * none of these tasks change which class a node resolves to, only how it's
+ * painted, so the class resolution below mirrors `pixelBase.ts`'s
+ * `pixelColorFor` exactly (same priority: inland water, then ocean depth,
+ * then biome name) rather than inventing a second read of the same data.
+ * River/lake/outline tones are flat (not dithered); shallows is flat except
+ * within `FOAM_BAND_PX`, where it alternates with foam. The pixel
  * math (`overworldRGBA`) is split from the `THREE.DataTexture` wrapper
  * (`overworldTexture`, in `mapTexture.ts`), same split as
  * `regionPixelRGBA`/`regionPixelTexture` and `./moonTexture.ts`, so it is
@@ -83,15 +89,21 @@ const OVERWORLD_LAKE: RGB = [70, 150, 150];
  * gray, deliberately not matching any real biome/ocean/water tone. */
 const OVERWORLD_UNKNOWN: RGB = [128, 128, 128];
 
-/** Reserved for Task 3 (crafted coastlines): the water band nearest a
- * coastline, and the bright foam dither just outside the land/water
- * outline. Unused by this task's flat fill — defined now so the palette's
- * shape is stable across the campaign's tasks. Visual-tuned. */
+/** The water band nearest a coastline (Task 3, crafted coastlines) — a
+ * lighter, warmer blue than open ocean so a shore reads as shallow water
+ * before it reads as land. Also half of the foam dither's tone pair (see
+ * `OVERWORLD_FOAM`). Visual-tuned. */
 const OVERWORLD_SHALLOWS: RGB = [110, 190, 220];
+/** The bright foam dither's other tone, painted (mixed with `shallows` via
+ * `BAYER_4`, see `foamOrShallowsTone`) on the water pixels immediately
+ * outside the coast outline (Task 3). Visual-tuned. */
 const OVERWORLD_FOAM: RGB = [232, 244, 250];
 
-/** Reserved for Tasks 3/4 (land/water and biome-boundary outlines). Unused
- * by this task's flat fill. Visual-tuned. */
+/** The land-side coastline silhouette (Task 3, crafted coastlines): a dark
+ * flat tone painted on a land pixel that has an ocean neighbor within 1
+ * output pixel, turning the land/water boundary into a crafted shore edge
+ * instead of a hard palette-fill seam. Reserved for Task 4's biome-boundary
+ * outlines too (same tone, a different boundary condition). Visual-tuned. */
 const OVERWORLD_OUTLINE: RGB = [18, 22, 26];
 
 /** The overworld renderer's full palette: per-biome light/dark pairs plus
@@ -123,6 +135,22 @@ const BAYER_4_RAW: readonly (readonly number[])[] = [
 export const BAYER_4: readonly (readonly number[])[] = BAYER_4_RAW.map((row) =>
   row.map((v) => (v + 0.5) / 16),
 );
+
+/** Width, in output pixels, of the shallows band on the water side of a
+ * coastline (Task 3, crafted coastlines) — a water pixel within this
+ * Chebyshev distance of a land pixel paints `OVERWORLD_PALETTE.shallows`
+ * (or the foam dither, within `FOAM_BAND_PX`) instead of the open-ocean
+ * depth dither. Visual-tuned; Task 5 is the tuning/perf pass if this reads
+ * too wide or narrow at `OVERWORLD_TEXTURE_DIM`. */
+export const COAST_BAND_PX = 3;
+
+/** Width, in output pixels, of the foam sub-band nearest the coast outline
+ * (a subset of `COAST_BAND_PX`, `FOAM_BAND_PX <= COAST_BAND_PX`) — a water
+ * pixel within this Chebyshev distance of land dithers between
+ * `OVERWORLD_PALETTE.foam` and `OVERWORLD_PALETTE.shallows` (see
+ * `foamOrShallowsTone`) rather than painting a solid foam tone, so the surf
+ * line reads as textured, not a flat ring. Visual-tuned. */
+export const FOAM_BAND_PX = 1;
 
 /** How strongly a node's elevation (relative to sea level) shifts the
  * dither's light/dark threshold away from neutral (0.5) — 0 would disable
@@ -204,25 +232,138 @@ function toneForNode(region: RegionScene, idx: number, px: number, py: number): 
   return ditherTone(tones, px, py, bias);
 }
 
+/** This output pixel's nearest region node index, given `dim` and the
+ * region's own `samples` node grid — the same nearest-node resolution
+ * `overworldRGBA`'s pixel loop and the coastline mask both need, so it's a
+ * single shared function rather than two copies of the same arithmetic. */
+function nodeIndexFor(region: RegionScene, dim: number, px: number, py: number): number {
+  const nodesPerSide = region.samples + 1;
+  const nodeRow = Math.min(region.samples, Math.floor((py / dim) * nodesPerSide));
+  const nodeCol = Math.min(region.samples, Math.floor((px / dim) * nodesPerSide));
+  return nodeRow * nodesPerSide + nodeCol;
+}
+
+/** Whether output pixel `(px, py)` has ANY ocean neighbor within a
+ * Chebyshev distance of 1 (the 8 surrounding pixels), per `oceanMask` (see
+ * `overworldRGBA`). Out-of-range neighbors (the texture's own edge) are
+ * skipped, not treated as water — a coastline needs an actual water pixel
+ * on the other side. Used only for LAND pixels (the coast outline is the
+ * land-side silhouette; see this module's doc comment). */
+function hasOceanNeighborWithin1(oceanMask: Uint8Array, dim: number, px: number, py: number): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = px + dx;
+      const ny = py + dy;
+      if (nx < 0 || nx >= dim || ny < 0 || ny >= dim) continue;
+      if (oceanMask[ny * dim + nx] === 1) return true;
+    }
+  }
+  return false;
+}
+
+/** The Chebyshev distance (in output pixels) from a WATER pixel `(px, py)`
+ * to the nearest LAND pixel, checked ring-by-ring out to `maxK`, or
+ * `undefined` if no land lies within `maxK`. Each ring `k` is only the
+ * perimeter of the `2k+1`-wide box (not the whole box) since any land
+ * closer than `k` would already have been found at a smaller ring — this
+ * keeps the search bounded (`O(maxK)` rings, `O(k)` cells per ring) rather
+ * than rechecking the same interior cells at every radius. Out-of-range
+ * neighbors are skipped (the texture edge is neither land nor water here).
+ */
+function nearestLandDistance(
+  oceanMask: Uint8Array,
+  dim: number,
+  px: number,
+  py: number,
+  maxK: number,
+): number | undefined {
+  const isLandAt = (x: number, y: number): boolean => {
+    if (x < 0 || x >= dim || y < 0 || y >= dim) return false;
+    return oceanMask[y * dim + x] === 0;
+  };
+  for (let k = 1; k <= maxK; k++) {
+    for (let dx = -k; dx <= k; dx++) {
+      if (isLandAt(px + dx, py - k) || isLandAt(px + dx, py + k)) return k;
+    }
+    for (let dy = -k + 1; dy <= k - 1; dy++) {
+      if (isLandAt(px - k, py + dy) || isLandAt(px + k, py + dy)) return k;
+    }
+  }
+  return undefined;
+}
+
+/** The foam dither at output pixel `(px, py)`: alternates between
+ * `OVERWORLD_PALETTE.foam` and `OVERWORLD_PALETTE.shallows` by the same
+ * `BAYER_4` ordered matrix Task 2's within-biome dithering uses (at a
+ * neutral, unbiased 0.5 threshold — foam has no elevation/relief concept to
+ * bias toward), so the surf line reads as a textured band rather than a
+ * flat, solid ring. */
+function foamOrShallowsTone(px: number, py: number): RGB {
+  const n = BAYER_4.length;
+  const bayerValue = BAYER_4[py % n]![px % n]!;
+  return bayerValue < 0.5 ? OVERWORLD_PALETTE.foam : OVERWORLD_PALETTE.shallows;
+}
+
 /** RGBA bytes (4 per output texel, row-major, length `dim*dim*4`) for
  * `region`, rendered at `dim x dim`: each output pixel takes its NEAREST
  * region node's class, dithered between that class's `light`/`dark` tone
- * pair by the Bayer matrix and the node's elevation (no coastlines/outlines
- * yet, see this module's doc comment). Row-major top-down (row 0 = region
- * gy=0), matching `regionPixelRGBA`'s convention so `overworldTexture` can
- * flip the same way (`flipY:true`) to agree with the symbol overlay. Pure —
- * no GPU, no randomness; identical `(region, dim)` always produces
- * identical bytes. */
+ * pair by the Bayer matrix and the node's elevation (Task 2), with a
+ * crafted coastline (Task 3) layered on top at the land/ocean boundary: a
+ * land pixel with an ocean neighbor within 1px takes the flat `outline`
+ * tone (the land-side silhouette); an ocean pixel within `COAST_BAND_PX` of
+ * land takes the flat `shallows` tone instead of the open-ocean depth
+ * dither, and the innermost `FOAM_BAND_PX` of that band dithers between
+ * `foam`/`shallows` instead. The coastline classification (land vs ocean)
+ * is the node's own `ocean` field only — inland water (river/lake) is
+ * unaffected, matching Task 2's scope note. Coastline tones WIN over the
+ * base fill/dither on the pixels they touch (composition order: coastline
+ * over dither). Row-major top-down (row 0 = region gy=0), matching
+ * `regionPixelRGBA`'s convention so `overworldTexture` can flip the same
+ * way (`flipY:true`) to agree with the symbol overlay. Pure — no GPU, no
+ * randomness; identical `(region, dim)` always produces identical bytes. */
 export function overworldRGBA(region: RegionScene, dim: number): Uint8Array {
-  const nodesPerSide = region.samples + 1;
   const out = new Uint8Array(dim * dim * 4);
+
+  // Pass 1: precompute each output pixel's nearest node and ocean/land
+  // classification once, up front — the coastline pass needs to look up
+  // NEIGHBORING pixels' classification regardless of raster order, so it
+  // can't be folded into a single row-major pass over `out`.
+  const nodeIdx = new Int32Array(dim * dim);
+  const oceanMask = new Uint8Array(dim * dim);
   for (let py = 0; py < dim; py++) {
-    const nodeRow = Math.min(region.samples, Math.floor((py / dim) * nodesPerSide));
-    const rowBase = nodeRow * nodesPerSide;
     for (let px = 0; px < dim; px++) {
-      const nodeCol = Math.min(region.samples, Math.floor((px / dim) * nodesPerSide));
-      const [r, g, b] = toneForNode(region, rowBase + nodeCol, px, py);
-      const o = (py * dim + px) * 4;
+      const i = py * dim + px;
+      const idx = nodeIndexFor(region, dim, px, py);
+      nodeIdx[i] = idx;
+      oceanMask[i] = region.ocean?.[idx] ? 1 : 0;
+    }
+  }
+
+  // Pass 2: paint. A land pixel touching ocean gets the outline; an ocean
+  // pixel near land gets the shallows/foam coastline band instead of its
+  // ordinary depth dither; everything else keeps Task 1/2's palette fill.
+  for (let py = 0; py < dim; py++) {
+    for (let px = 0; px < dim; px++) {
+      const i = py * dim + px;
+      const idx = nodeIdx[i]!;
+      let tone: RGB;
+      if (oceanMask[i] === 1) {
+        const landDistance = nearestLandDistance(oceanMask, dim, px, py, COAST_BAND_PX);
+        if (landDistance !== undefined && landDistance <= FOAM_BAND_PX) {
+          tone = foamOrShallowsTone(px, py);
+        } else if (landDistance !== undefined) {
+          tone = OVERWORLD_PALETTE.shallows;
+        } else {
+          tone = toneForNode(region, idx, px, py);
+        }
+      } else if (hasOceanNeighborWithin1(oceanMask, dim, px, py)) {
+        tone = OVERWORLD_PALETTE.outline;
+      } else {
+        tone = toneForNode(region, idx, px, py);
+      }
+      const [r, g, b] = tone;
+      const o = i * 4;
       out[o] = r;
       out[o + 1] = g;
       out[o + 2] = b;
