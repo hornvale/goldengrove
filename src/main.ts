@@ -269,6 +269,7 @@ function mountViews(
   const zoom = new ZoomController();
   let view: ZoomTarget = state.view;
   zoom.jumpTo(view); // the initial view from a deep link never animates in
+  setCanvasPointerEvents(view); // initial view never passes through applyView
 
   // The region key the map rung is waiting on (set by the globe->map
   // handoff's requestRegion call, consumed by deliverRegion below) — null
@@ -465,10 +466,19 @@ function mountViews(
     hud.setActiveSpeed(mult);
     applySeasonalHold(mult);
     setViewButtonFor(view);
+    setCanvasPointerEvents(v);
+    applyTrueScale();
+  }
+
+  /** Only the active rung's canvas takes pointer input — the others (including
+   * the opacity-0, paint-topmost map canvas) must be `pointer-events: none` or
+   * they intercept clicks meant for the visible rung underneath. Called from
+   * `applyView` on every rung switch AND once at boot (below), since the
+   * initial view never passes through `applyView`. */
+  function setCanvasPointerEvents(v: ZoomTarget): void {
     systemCanvas.style.pointerEvents = v === 'system' ? 'auto' : 'none';
     globeCanvas.style.pointerEvents = v === 'globe' ? 'auto' : 'none';
     mapCanvas.style.pointerEvents = v === 'map' ? 'auto' : 'none';
-    applyTrueScale();
   }
 
   /** Writes `seed`/`view`/`day` back to the URL via `replaceState` — no

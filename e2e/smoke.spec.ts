@@ -8,7 +8,7 @@ test('seed 42 boots, renders, and stays console-clean', async ({ page }) => {
   await page.goto('#seed=42');
   // Genesis runs in-browser and takes seconds; the HUD only mounts after.
   await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
-  await expect(page.locator('canvas.view-canvas')).toHaveCount(2);
+  await expect(page.locator('canvas.view-canvas')).toHaveCount(3); // system, globe, map
   await expect(page.locator('.scale-caption')).toContainText('schematic scale');
 
   // The view toggle is the zoom ladder's discrete control.
@@ -41,7 +41,7 @@ test('the helm: true scale, inspector, and the capped globe clock', async ({ pag
 
   // The inspector: the globe fills the viewport center — clicking it is a
   // world card, deterministically.
-  await page.locator('canvas.view-canvas').last().click({ position: { x: 640, y: 360 } });
+  await page.locator('canvas.view-canvas').nth(1).click({ position: { x: 640, y: 360 } });
   await expect(page.locator('.info-card')).toContainText('the world');
   await page.keyboard.press('Escape');
   await expect(page.locator('.info-card')).toBeHidden();
@@ -61,7 +61,7 @@ test('the lens roster: every lens repaints the globe and updates its own caption
   await page.goto('#seed=42&view=globe&day=0.1');
   await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
 
-  const globeCanvas = page.locator('canvas.view-canvas').last();
+  const globeCanvas = page.locator('canvas.view-canvas').nth(1);
   const caption = page.locator('.hud-caption');
 
   // Pause the clock: left running, the day keeps advancing for the whole
@@ -134,6 +134,50 @@ test('the lens roster: every lens repaints the globe and updates its own caption
   expect(errors).toEqual([]);
 });
 
+test('the map rung: zooming into the globe crosses to the flat map and back', async ({ page }) => {
+  await page.goto('#seed=42&view=globe&day=0.1');
+  await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
+  await page.waitForTimeout(800);
+  // pause the clock (same idiom as the other tests)
+  await page.locator('.hud-bottom button').first().click();
+
+  const stage = page.locator('.view-stage');
+  const box = (await stage.boundingBox())!;
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+
+  // Wheel INTO the globe hard: cross its dolly floor, then hand off to the map
+  // rung. (~26 steps clears OrbitControls' damping down to minDistance.)
+  for (let i = 0; i < 26; i++) {
+    await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(80);
+  }
+  // Let the region fetch + 1.5s crossfade settle.
+  await page.waitForTimeout(2500);
+
+  // The three view canvases: system, globe, map. On the map rung the map
+  // canvas (last) is opaque and the other two are faded out.
+  const opacities = await page.evaluate(() =>
+    [...document.querySelectorAll('canvas.view-canvas')].map((c) => (c as HTMLElement).style.opacity),
+  );
+  expect(opacities[2]).toBe('1'); // map canvas fully faded in
+
+  // The map canvas renders non-blank (the placeholder quad). Use an ELEMENT
+  // screenshot, NOT a full-page one — headless WebGL full-page capture is
+  // flaky, but a direct element capture is reliable.
+  const mapShot = await page.locator('canvas.view-canvas').nth(2).screenshot();
+  expect(mapShot.length).toBeGreaterThan(5000);
+
+  // Wheel back OUT of the map: return to the globe.
+  await page.mouse.wheel(0, 120);
+  await page.waitForTimeout(2500);
+  const after = await page.evaluate(() =>
+    [...document.querySelectorAll('canvas.view-canvas')].map((c) => (c as HTMLElement).style.opacity),
+  );
+  expect(after[1]).toBe('1'); // globe canvas fully faded back in
+});
+
 test('the style roster: every render style renders the globe non-blank and transformed', async ({ page }) => {
   test.setTimeout(240_000);
   const errors: string[] = [];
@@ -143,7 +187,7 @@ test('the style roster: every render style renders the globe non-blank and trans
   await page.goto('#seed=42&view=globe&day=0.1');
   await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
 
-  const globeCanvas = page.locator('canvas.view-canvas').last();
+  const globeCanvas = page.locator('canvas.view-canvas').nth(1);
   // Pause the clock (same reason as the lens roster: a running day can drift two
   // captures onto the dark night side and make them byte-identical black frames).
   await page.locator('.hud-bottom button').first().click();
