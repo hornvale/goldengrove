@@ -78,6 +78,18 @@ export function sampleTile<K extends TileArrayKey>(
   return layer[tileIndex(tiles, lat, lon)] as never;
 }
 
+/** Snap an elevation (metres) down to the floor of its `bandM`-wide band —
+ * the quantization behind the Terraced style's stepped, "rice-terrace"
+ * contour. Floor-snapped (not rounded), so a band covers
+ * `[k*bandM, (k+1)*bandM)` for every integer `k`, including negative `k`:
+ * below sea level steps DOWN too (`quantizeBands(-1, 200)` is `-200`, not
+ * `0`) — one consistent staircase direction rather than a floor that
+ * reverses at zero. Pure and side-effect-free so it composes into any
+ * `radiusAtLatLon` closure (below) without its own test fixture. */
+export function quantizeBands(elevationM: number, bandM: number): number {
+  return Math.floor(elevationM / bandM) * bandM;
+}
+
 /** Build one cube-sphere *tile*'s displaced, vertex-colored geometry, at
  * whatever `level`/`ix`/`iy` the `TileId` names (a level-0 tile is the whole
  * face; deeper tiles are the adaptive-LOD quadtree's finer squares). Each
@@ -85,7 +97,11 @@ export function sampleTile<K extends TileArrayKey>(
  * the same data on a finer lattice — smoother relief where the camera is
  * close. `radius` is the rendered sphere's undisplaced radius (world units);
  * `reliefScale` is the exaggeration multiple applied to elevation before it
- * displaces the surface — 0 gives a smooth sphere. */
+ * displaces the surface — 0 gives a smooth sphere. `bandM`, if given, quantizes
+ * the sampled elevation through `quantizeBands` before it displaces anything
+ * (the Terraced style's stepped contour); omitted (the default), the
+ * elevation displaces continuously — today's Smooth path, byte-identical to
+ * before this parameter existed. */
 export function buildTileGeometry(
   tiles: TilesScene,
   tile: TileId,
@@ -93,15 +109,23 @@ export function buildTileGeometry(
   reliefScale: number,
   colorAt: (i: number) => RGB,
   skirtDepth = 0,
+  bandM?: number,
 ): THREE.BufferGeometry {
   const grid = tileGrid(tile);
   const n = TILE_QUADS + 1;
   // A pure function of (lat, lon) — the SAME path a vertex's own displaced
   // position uses — so the analytic normal probe (which evaluates this at
   // lat/lon-offset neighbours, not just grid vertices) agrees bit-for-bit
-  // with whatever any OTHER tile computes at that same (lat, lon).
-  const radiusAtLatLon = (lat: number, lon: number): number =>
-    radius * (1 + (reliefScale * sampleElevationBilinear(tiles, lat, lon)) / REFERENCE_RADIUS_M);
+  // with whatever any OTHER tile computes at that same (lat, lon). Banding
+  // (when `bandM` is set) happens INSIDE this closure, before the elevation
+  // displaces the surface, so the probe's neighbour samples see the same
+  // stepped field the surface itself does — normals step at band edges
+  // (flat within a band, a crease at the riser), which is the terraced look.
+  const radiusAtLatLon = (lat: number, lon: number): number => {
+    const elev = sampleElevationBilinear(tiles, lat, lon);
+    const banded = bandM === undefined ? elev : quantizeBands(elev, bandM);
+    return radius * (1 + (reliefScale * banded) / REFERENCE_RADIUS_M);
+  };
   return buildGridGeometry(
     n,
     (i) => [grid.units[3 * i]!, grid.units[3 * i + 1]!, grid.units[3 * i + 2]!],
@@ -119,25 +143,31 @@ export function buildTileGeometry(
  * (`regionPatchUnits`) so it registers on the globe exactly where the
  * interpolated tile it replaces did. `colorAt(i)` is the lens applied to the
  * region's node `i` (the region carries the same per-node fields the lens
- * reads). */
+ * reads). `bandM`, if given, quantizes elevation through `quantizeBands`
+ * before displacement (the Terraced style); omitted, the continuous path
+ * (Smooth) is unchanged. */
 export function buildRegionTileGeometry(
   region: RegionScene,
   radius: number,
   reliefScale: number,
   colorAt: (i: number) => RGB,
   skirtDepth = 0,
+  bandM?: number,
 ): THREE.BufferGeometry {
   const units = regionPatchUnits(region);
   const n = region.samples + 1;
+  const applyBand = (elev: number): number => (bandM === undefined ? elev : quantizeBands(elev, bandM));
   // Pure function of (lat, lon) via the region's own field (see
   // `sampleRegionElevation`) — the counterpart of `buildTileGeometry`'s
-  // `radiusAtLatLon`, used by the analytic normal probe.
+  // `radiusAtLatLon`, used by the analytic normal probe. Bands (via
+  // `applyBand`) the same way the surface's own `radiusAt` below does, so
+  // the probe reads the identical stepped field.
   const radiusAtLatLon = (lat: number, lon: number): number =>
-    radius * (1 + (reliefScale * sampleRegionElevationBilinear(region, lat, lon)) / REFERENCE_RADIUS_M);
+    radius * (1 + (reliefScale * applyBand(sampleRegionElevationBilinear(region, lat, lon))) / REFERENCE_RADIUS_M);
   return buildGridGeometry(
     n,
     (i) => units[i]!,
-    (i) => radius * (1 + (reliefScale * region.elevation_m[i]!) / REFERENCE_RADIUS_M),
+    (i) => radius * (1 + (reliefScale * applyBand(region.elevation_m[i]!)) / REFERENCE_RADIUS_M),
     (i) => colorAt(i), // a region node's index IS the colour index
     skirtDepth,
     (i) => {

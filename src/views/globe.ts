@@ -59,6 +59,13 @@ export const RELIEF_EXAGGERATION = 60;
  * ground, close enough that it reads as standing on it. */
 export const MARKER_CLEARANCE = 0.006;
 
+/** The Terraced style's elevation band width, in metres — every tile's
+ * sampled elevation snaps to a multiple of this (`quantizeBands` in
+ * `./worldMesh.ts`) before it displaces the surface, producing the stepped
+ * "rice-terrace" contour. A tunable constant, not derived from the data;
+ * start ~250m per the campaign brief, retune in the visual pass. */
+const TERRACE_BAND_M = 250;
+
 /** Distance of the directional "sun" light from the globe center, in world
  * units — far enough to read as parallel light across the whole sphere. */
 const LIGHT_DISTANCE = GLOBE_RADIUS * 20;
@@ -247,9 +254,12 @@ function placeMarker(m: Marker, reliefScale: number): void {
 
 /** The globe's render style — geometry + shading, orthogonal to the data
  * `Lens` (which only recolors). `smooth` is today's cube-sphere mesh;
- * `voxel` and `terraced` land in later tasks (Task 1 treats them as
- * smooth-geometry-for-now, never throwing); `faceted` flat-shades the
- * existing mesh, the cheapest style — just a material flag. */
+ * `voxel` lands in a later task (still smooth-geometry-for-now, never
+ * throwing); `faceted` flat-shades the existing mesh, the cheapest style —
+ * just a material flag; `terraced` (Task 2) quantizes elevation into
+ * discrete bands (`TERRACE_BAND_M`, `quantizeBands` in `./worldMesh.ts`)
+ * before displacement, flat-shaded, producing a stepped "rice-terrace"
+ * contour on the same shared-vertex mesh. */
 export type GlobeStyle = 'smooth' | 'voxel' | 'terraced' | 'faceted';
 
 /** The globe view's public surface: a mountable object graph plus the
@@ -311,9 +321,11 @@ export interface GlobeView {
    * visual spin only; this one freezes the season only, orthogonal state).
    * Off by default, matching today's un-pinned season. */
   setDayHold(on: boolean): void;
-  /** Switch the render style (Task 1: `faceted` flat-shades the surface
-   * material; `voxel`/`terraced` are smooth-geometry-for-now until their own
-   * tasks land — the switch is always safe, never throws). */
+  /** Switch the render style: `faceted` flat-shades the surface material in
+   * place (no rebuild); `terraced` (Task 2) rebuilds every mounted tile with
+   * its elevation quantized into bands, flat-shaded; `voxel` is still
+   * smooth-geometry-for-now until its own task lands — the switch is always
+   * safe, never throws. */
   setStyle(style: GlobeStyle): void;
 }
 
@@ -430,6 +442,14 @@ export function createGlobeView(
   let currentSelected: TileId[] = [];
   let reliefOn = false; // true-relief (1×) vs schematic (RELIEF_EXAGGERATION×)
   const reliefScale = (): number => (reliefOn ? 1 : RELIEF_EXAGGERATION);
+  // The render-style axis (The Massing): declared here, ahead of
+  // `buildTileSlot`/the initial `rebuildAllTiles` call below, since both read
+  // it — a `let` declared after its first read would throw (temporal dead
+  // zone). `bandM()` is `buildTileSlot`'s single source of truth for whether
+  // a tile bands its elevation (Terraced) or stays continuous (everything
+  // else, including today's Smooth).
+  let activeStyle: GlobeStyle = 'smooth';
+  const bandM = (): number | undefined => (activeStyle === 'terraced' ? TERRACE_BAND_M : undefined);
 
   // Region patches (true higher-res terrain) for the deep near tiles: cached
   // by tile key, requested async through the worker. Gated to spinning worlds
@@ -532,11 +552,12 @@ export function createGlobeView(
         scale,
         (node) => activeLens.colorAt(region as unknown as TilesScene, node, lastDay ?? 0, seasonalCtx),
         skirt,
+        bandM(),
       );
       colorSrc = region as unknown as TilesScene;
       idx = identityIdx;
     } else {
-      geom = buildTileGeometry(tiles, t, GLOBE_RADIUS, scale, colorAt, skirt);
+      geom = buildTileGeometry(tiles, t, GLOBE_RADIUS, scale, colorAt, skirt, bandM());
       colorSrc = tiles;
       const grid = tileGrid(t);
       // Only the surface vertices (n×n) are lens-recoloured; the skirt copies
@@ -970,14 +991,21 @@ export function createGlobeView(
   // across every tile slot (`buildTileSlot`, above), so flipping its
   // `flatShading` flag here repaints every already-built tile without a
   // rebuild — flat shading only recomputes per-face normals from the
-  // existing geometry. `voxel`/`terraced` have no geometry of their own yet
-  // (later tasks), so they fall through to today's smooth build; the switch
-  // never throws.
-  let activeStyle: GlobeStyle = 'smooth';
+  // existing geometry. `voxel` has no geometry of its own yet (a later
+  // task), so it falls through to today's smooth build; the switch never
+  // throws. `terraced` (this task) DOES change geometry — banding is baked
+  // into each tile's vertex positions at build time (`bandM`, declared with
+  // `activeStyle` above) — so entering or leaving it needs a full rebuild,
+  // unlike the material-only faceted switch. Terraced also flat-shades: a
+  // stepped surface reads as terraces only without smooth-shaded normals
+  // blurring the risers.
   function setStyle(style: GlobeStyle): void {
+    const wasBanded = activeStyle === 'terraced';
     activeStyle = style;
-    material.flatShading = activeStyle === 'faceted';
+    const isBanded = activeStyle === 'terraced';
+    material.flatShading = activeStyle === 'faceted' || activeStyle === 'terraced';
     material.needsUpdate = true;
+    if (wasBanded !== isBanded) rebuildAllTiles(currentSelected);
   }
 
   let selectedGroup: string | null = null;

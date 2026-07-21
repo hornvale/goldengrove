@@ -726,9 +726,47 @@ test('setStyle("faceted") flat-shades the surface material; "smooth" restores sm
   expect(mat.flatShading).toBe(false);
 });
 
-test('setStyle never throws for voxel or terraced (smooth-geometry-for-now)', () => {
+test('setStyle never throws for voxel (still smooth-geometry-for-now)', () => {
   const view = createGlobeView(markerTiles([]), spinningSys());
   expect(() => view.setStyle('voxel')).not.toThrow();
-  expect(() => view.setStyle('terraced')).not.toThrow();
   expect(() => view.setStyle('smooth')).not.toThrow();
+});
+
+test('setStyle("terraced") flat-shades AND rebuilds tile geometry with banded elevation', () => {
+  const globe = makeGlobe(); // real seed-42 terrain — enough relief to distinguish banded from continuous
+  const mat = surfaceMaterial(globe);
+  expect(mat.flatShading).toBe(false);
+
+  const firstTileMesh = (): THREE.Mesh => {
+    let mesh: THREE.Mesh | null = null;
+    globe.object3d.traverse((o) => {
+      if (!mesh && o.name.startsWith('globe-tile-')) mesh = o as THREE.Mesh;
+    });
+    return mesh as unknown as THREE.Mesh;
+  };
+  const beforeGeom = firstTileMesh().geometry;
+
+  globe.setStyle('terraced');
+  expect(mat.flatShading).toBe(true);
+  // Unlike faceted (a material-only flag flip), banding changes vertex
+  // positions — this must be an actual geometry rebuild, not the same
+  // object reused.
+  const afterGeom = firstTileMesh().geometry;
+  expect(afterGeom).not.toBe(beforeGeom);
+
+  // Real terrain has enough relief variation that a continuous (Smooth)
+  // build shows a distinct radius at nearly every vertex; terraced collapses
+  // them onto a small, finite set of band floors — the geometry-level half
+  // of `worldMesh.test.ts`'s `quantizeBands` coverage, confirming globe.ts
+  // actually wires `bandM` through for a real mounted tile.
+  const pos = afterGeom.getAttribute('position');
+  const radii = new Set<number>();
+  for (let i = 0; i < pos.count; i++) {
+    radii.add(Number(Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i)).toFixed(5)));
+  }
+  expect(radii.size).toBeGreaterThan(0);
+  expect(radii.size).toBeLessThan(pos.count / 4); // far fewer bands than vertices
+
+  globe.setStyle('smooth');
+  expect(mat.flatShading).toBe(false);
 });

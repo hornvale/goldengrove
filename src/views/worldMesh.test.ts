@@ -5,6 +5,7 @@ import {
   buildFaceGeometry,
   buildRegionTileGeometry,
   buildTileGeometry,
+  quantizeBands,
   sampleElevationBilinear,
   sampleTile,
   stitchNormals,
@@ -197,6 +198,69 @@ describe('buildTileGeometry (LOD tiles)', () => {
     ].map((t) => buildTileGeometry(tiles, t, 2, 0, ignoreColor));
     // Each child is a valid non-empty mesh on the sphere.
     for (const k of kids) expect(k.getAttribute('position').count).toBeGreaterThan(0);
+  });
+});
+
+describe('quantizeBands', () => {
+  it('snaps elevation down to its band floor', () => {
+    expect(quantizeBands(0, 200)).toBe(0);
+    expect(quantizeBands(199, 200)).toBe(0);
+    expect(quantizeBands(200, 200)).toBe(200);
+    expect(quantizeBands(-1, 200)).toBe(-200); // below sea level steps down
+    expect(quantizeBands(650, 200)).toBe(600);
+  });
+});
+
+describe('buildTileGeometry (terraced banding)', () => {
+  it('with no bandM, the radius stays continuous (today\'s Smooth path, unchanged)', () => {
+    const geom = buildTileGeometry(slopedTiles(), { face: 0, level: 0, ix: 0, iy: 0 }, 2, 30, ignoreColor, 0);
+    const pos = geom.getAttribute('position');
+    const radii = new Set<number>();
+    for (let i = 0; i < pos.count; i++) {
+      radii.add(Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i)));
+    }
+    // The sawtooth relief has many distinct slopes, so an unbanded build sees
+    // far more distinct radii than any small banded set could produce.
+    expect(radii.size).toBeGreaterThan(8);
+  });
+
+  it('with a bandM, distinct radii collapse to a small finite banded set', () => {
+    const bandM = 200;
+    const geom = buildTileGeometry(slopedTiles(), { face: 0, level: 0, ix: 0, iy: 0 }, 2, 30, ignoreColor, 0, bandM);
+    const pos = geom.getAttribute('position');
+    // Positions round-trip through a Float32Array (WebGL upload requirement —
+    // see the `buildFaceGeometry` sphere test above), so two vertices at the
+    // exact same banded elevation can still land a few ULPs apart depending on
+    // their (different) unit-vector direction. A banding step here is
+    // radius·reliefScale·bandM/REFERENCE_RADIUS_M ≈ 2·30·200/6.371e6 ≈ 1.9e-3
+    // — far larger than that float32 noise (~2e-7 at this magnitude) — so
+    // rounding to 5 decimals collapses same-band vertices without merging
+    // adjacent, distinct bands.
+    const radii = new Set<number>();
+    for (let i = 0; i < pos.count; i++) {
+      radii.add(Number(Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i)).toFixed(5)));
+    }
+    // slopedTiles ramps 0..3000m, so at most 3000/200 + 1 = 16 distinct bands
+    // are reachable — far fewer than the continuous case, and finite/small.
+    expect(radii.size).toBeGreaterThan(1);
+    expect(radii.size).toBeLessThanOrEqual(16);
+    // Every reachable radius must correspond to a band floor — i.e. its
+    // reconstructed elevation is within a hair of SOME multiple of `bandM`,
+    // not sitting mid-band the way a continuous (unbanded) surface would.
+    // Reversing radius back to elevation multiplies the float32-position
+    // round-trip's noise by REFERENCE_RADIUS_M/reliefScale (a ~2e5
+    // amplification, since REFERENCE_RADIUS_M is on the order of 1e6 and
+    // reliefScale is a small integer), so the ~1e-7-relative float32 error
+    // becomes order-1m here — comfortably below the 200m band, so checking
+    // "near a multiple" (not band-floor-of-the-reconstruction, which a
+    // boundary-adjacent noisy value could floor into the WRONG band) is the
+    // robust form.
+    for (const r of radii) {
+      const elevM = ((r / 2 - 1) * REFERENCE_RADIUS_M) / 30;
+      const remainder = ((elevM % bandM) + bandM) % bandM;
+      const distToBand = Math.min(remainder, bandM - remainder);
+      expect(distToBand).toBeLessThan(1);
+    }
   });
 });
 
