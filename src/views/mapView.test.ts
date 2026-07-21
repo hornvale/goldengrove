@@ -41,3 +41,12 @@ test('dispose empties the scene', () => {
   v.dispose();
   expect(v.scene.children.filter((c) => c instanceof THREE.Mesh).length).toBe(0);
 });
+
+test('setRegion textures the quad with the region pixel map', () => {
+  const v = createMapView();
+  v.setRegion(fakeRegion());
+  const mesh = v.scene.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
+  const mat = mesh.material as THREE.MeshBasicMaterial;
+  expect(mat.map).not.toBeNull();
+  expect(mat.map).toBeInstanceOf(THREE.DataTexture);
+});
