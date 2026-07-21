@@ -1,11 +1,15 @@
 /** The map view: the flat pixel-art rung below the globe (orrery's newest
  * zoom rung) — a self-contained 2D orthographic three.js scene showing one
  * region as a flat quad textured with its crisp pixel-art biome/ocean map
- * (`./mapTexture`). A later task adds the symbol overlay (Stage 4) and wires
- * this view into the app's render loop and zoom ladder (Task 4). */
+ * (`./mapTexture`), overlaid with RPG symbol sprites (`./mapSymbols`) for
+ * peaks/forests/waves. A later task wires this view into the app's render
+ * loop and zoom ladder (Task 4), driving the symbol rung from the map
+ * camera's zoom instead of the fixed `'near'` used here. */
 import * as THREE from 'three';
 import type { RegionScene } from '../sim/scene';
 import { regionPixelTexture } from './mapTexture';
+import type { MapSymbols } from './mapSymbols';
+import { buildMapSymbols } from './mapSymbols';
 
 /** Half-extent of the orthographic frustum (world units) — the camera frames
  * a roughly unit-sized area centered on the origin, matching the unit quad
@@ -47,8 +51,14 @@ export function createMapView(): MapView {
   camera.lookAt(0, 0, 0);
 
   let mesh: THREE.Mesh | null = null;
+  let symbols: MapSymbols | null = null;
 
   function clearMesh(): void {
+    if (symbols) {
+      scene.remove(symbols.group);
+      symbols.dispose();
+      symbols = null;
+    }
     if (!mesh) return;
     scene.remove(mesh);
     mesh.geometry.dispose();
@@ -67,6 +77,13 @@ export function createMapView(): MapView {
     mesh = new THREE.Mesh(geometry, material);
     mesh.name = `map-region-${region.face}:${region.level}:${region.ix}:${region.iy}`;
     scene.add(mesh);
+
+    // Symbol overlay: peaks/forests/waves on top of the textured quad. The
+    // rung will be driven from the map camera's zoom in a later task; for
+    // now it's fixed at 'near' (the finest rung).
+    symbols = buildMapSymbols(region);
+    symbols.update('near');
+    scene.add(symbols.group);
   }
 
   function render(renderer: THREE.WebGLRenderer): void {
