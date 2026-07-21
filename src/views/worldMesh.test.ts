@@ -264,6 +264,46 @@ describe('buildTileGeometry (terraced banding)', () => {
   });
 });
 
+describe('buildRegionTileGeometry (terraced banding)', () => {
+  it('with a bandM, distinct radii collapse to a small finite banded set', () => {
+    // buildRegionTileGeometry bands TWO elevation sources through a shared
+    // `applyBand` helper: the surface position reads `region.elevation_m[i]`
+    // directly, while the analytic-normal probe goes through
+    // `sampleRegionElevationBilinear` — a distinct code path from the tile
+    // builder's single `radiusAtLatLon` closure. This fixture ramps elevation
+    // 0..3000m across `samples + 1` columns (repeated down every row), giving
+    // 33 distinct raw per-node elevations — enough that an unbanded surface
+    // shows far more than 16 distinct radii (mirroring `slopedTiles`' sawtooth
+    // ramp, but through the region builder's own per-node field, not a
+    // bilinear tiles-export resample).
+    const samples = 32;
+    const n = samples + 1;
+    const elevation_m: number[] = [];
+    for (let row = 0; row < n; row++) {
+      for (let col = 0; col < n; col++) elevation_m.push(3000 * (col / samples));
+    }
+    const region = { face: 0, level: 2, ix: 0, iy: 0, samples, elevation_m } as unknown as RegionScene;
+
+    const bandM = 200;
+    const geom = buildRegionTileGeometry(region, 2, 30, ignoreColor, 0, bandM);
+    const pos = geom.getAttribute('position');
+    // skirtDepth 0 → surface vertices only, one per region node.
+    expect(pos.count).toBe(n * n);
+    const radii = new Set<number>();
+    for (let i = 0; i < pos.count; i++) {
+      // toFixed(5) collapses same-band float32 noise without merging
+      // adjacent bands — see the analogous rounding-tolerance comment on
+      // `buildTileGeometry`'s banded test above.
+      radii.add(Number(Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i)).toFixed(5)));
+    }
+    // The ramp reaches 33 distinct raw elevations spanning 0..3000m, so a
+    // continuous (unbanded) build would show up to 33 distinct radii; banded
+    // to 200m steps, at most 3000/200 + 1 = 16 band floors are reachable.
+    expect(radii.size).toBeGreaterThan(1);
+    expect(radii.size).toBeLessThanOrEqual(16);
+  });
+});
+
 describe('buildFaceGeometry', () => {
   it('reliefScale 0 puts every vertex exactly on the sphere', () => {
     const geom = buildFaceGeometry(flatTiles(), 0, 2, 0, ignoreColor);

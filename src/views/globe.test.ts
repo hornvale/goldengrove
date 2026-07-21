@@ -769,4 +769,18 @@ test('setStyle("terraced") flat-shades AND rebuilds tile geometry with banded el
 
   globe.setStyle('smooth');
   expect(mat.flatShading).toBe(false);
+
+  // Symmetric with the forward (smooth->terraced) collapse assertion above:
+  // switching back must actually rebuild the geometry away from the banded
+  // set, not merely flip flatShading back. Real terrain has enough relief
+  // variation that a continuous build shows a distinct radius at nearly
+  // every vertex, so the reverse rebuild should recover (most of) that
+  // many-valued distribution rather than staying stuck on the small banded set.
+  const smoothGeom = firstTileMesh().geometry;
+  const smoothPos = smoothGeom.getAttribute('position');
+  const smoothRadii = new Set<number>();
+  for (let i = 0; i < smoothPos.count; i++) {
+    smoothRadii.add(Number(Math.hypot(smoothPos.getX(i), smoothPos.getY(i), smoothPos.getZ(i)).toFixed(5)));
+  }
+  expect(smoothRadii.size).toBeGreaterThan(smoothPos.count / 2); // back to (near-)continuous, not banded
 });
