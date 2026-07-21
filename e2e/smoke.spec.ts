@@ -134,6 +134,99 @@ test('the lens roster: every lens repaints the globe and updates its own caption
   expect(errors).toEqual([]);
 });
 
+test('the globe geometry styles: every .hud-style option renders the globe non-blank (The Massing, Task 7)', async ({ page }) => {
+  test.setTimeout(240_000);
+  const errors: string[] = [];
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+  page.on('pageerror', (err) => errors.push(String(err)));
+
+  await page.goto('#seed=42&view=globe&day=0.1');
+  await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
+
+  const globeCanvas = page.locator('canvas.view-canvas').nth(1);
+  // Pause the clock (same reason as the lens/style rosters above: a running
+  // day can drift two captures onto the dark night side).
+  await page.locator('.hud-bottom button').first().click();
+  // Rotate to bring land into view so each style has real relief to act on.
+  const box = (await globeCanvas.boundingBox())!;
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  for (let i = 0; i < 3; i++) {
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx - 150, cy, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+  }
+
+  // This is a DIFFERENT axis from `.hud-styles`/`[data-style]` above (the
+  // Idioms' screen-space post-process roster) — `.hud-style` is The
+  // Massing's globe geometry/shading dropdown (smooth/voxel/terraced/faceted).
+  const styleSelect = page.locator('.hud-style');
+  await expect(styleSelect).toHaveCount(1);
+
+  for (const style of ['smooth', 'voxel', 'terraced', 'faceted']) {
+    await styleSelect.selectOption(style);
+    await expect(globeCanvas).toBeVisible();
+    // Let the rebuild land before sampling.
+    await page.waitForTimeout(400);
+    const shot = await globeCanvas.screenshot();
+    // A geometry rebuild that throws (or a style that renders nothing) still
+    // yields a compositor frame, but a blank/degenerate one compresses to a
+    // tiny PNG — the same non-blank floor the lens/style-roster tests above
+    // use, not a pixel-baseline comparison (none exists; WebGL is too noisy
+    // for one).
+    expect(shot.length, `${style} rendered blank`).toBeGreaterThan(5_000);
+  }
+
+  expect(errors).toEqual([]);
+});
+
+test('the globe deep zoom: wheel-zooming to the new near limit in voxel style does not crash (The Massing, Task 7)', async ({ page }) => {
+  test.setTimeout(240_000);
+  const errors: string[] = [];
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+  page.on('pageerror', (err) => errors.push(String(err)));
+
+  await page.goto('#seed=42&view=globe&day=0.1');
+  await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
+
+  // Pause the clock so the world doesn't spin under the zoom.
+  await page.locator('.hud-bottom button').first().click();
+
+  await page.locator('.hud-style').selectOption('voxel');
+  await page.waitForTimeout(300);
+
+  const globeCanvas = page.locator('canvas.view-canvas').nth(1);
+  const box = (await globeCanvas.boundingBox())!;
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+
+  // Deep zoom-in toward the new, lowered near limit (Task 6's
+  // `globeControls.minDistance`/`GLOBE_NEAR`): many wheel steps, well beyond
+  // what the OLD floor needed to clear (the wheel-no-longer-switches-views
+  // test above clears the pre-Massing floor in 30 steps of -120) so this
+  // comfortably reaches the new, deeper minimum and exercises Task 6's
+  // deeper LOD ceiling (`LOD_CDLOD_MAX_LEVEL`) plus the voxel rebuild it
+  // triggers at each refine.
+  for (let i = 0; i < 50; i++) {
+    await page.mouse.wheel(0, -220);
+    await page.waitForTimeout(60);
+  }
+  // Let any in-flight region replies/rebuilds land.
+  await page.waitForTimeout(2_000);
+
+  await expect(globeCanvas).toBeVisible();
+  const shot = await globeCanvas.screenshot();
+  // Same non-blank floor as above: a crashed render or a camera clipped
+  // fully into geometry (dark degenerate frame) would compress to a tiny
+  // PNG; a normal frame (surface, or the exotic-peak graze case) does not.
+  expect(shot.length).toBeGreaterThan(5_000);
+
+  expect(errors).toEqual([]);
+});
+
 /** Polls the three view canvases' opacities until `predicate` passes or the
  * timeout elapses — the crossfade is ~1.5s, so a plain read racing that
  * transition would catch it mid-fade rather than settled. */
