@@ -18,6 +18,9 @@ export interface BaseTreatment {
   /** rgb is 0–255 (the lens output). Return 0–255. `src`/`idx` give the
    * treatment the raw datum (e.g. src.ocean[idx]) so it shades from data. */
   transform(rgb: readonly [number, number, number], src: TilesScene, idx: number): [number, number, number];
+  /** Render the globe surface unlit (flat colour, no directional shading /
+   *  terminator) — the flat pixel-art map look. Absent/false = lit (today). */
+  unlit?: boolean;
 }
 
 /** A scene-graph layer of derived-feature symbols. A later task fills in the

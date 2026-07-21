@@ -14,6 +14,7 @@ const quant = (c: number): number => Math.min(255, Math.round(c / PIXEL_STEP) * 
  * and vice-versa — the bug dies here by construction. */
 export const pixelBaseTreatment: BaseTreatment = {
   id: 'pixel',
+  unlit: true,
   transform(rgb, src: TilesScene, idx) {
     const base = src.ocean[idx] ? OCEAN_RGB : rgb;
     return [quant(base[0]), quant(base[1]), quant(base[2])];

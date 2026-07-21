@@ -35,10 +35,12 @@ const SYMBOL_CLEARANCE = 1.01;
 
 /** Peak sprite scale bounds, in units of `GLOBE_RADIUS` — a tall peak reads
  * bigger than a modest one, clamped so an extreme elevation never dwarfs the
- * globe. */
-const PEAK_SCALE_MIN = 0.02;
+ * globe. Doubled from the original (0.02 / 0.08) — the visual pass found
+ * peaks too faint to read at far/mid zoom; the elevation-proportional term
+ * is unchanged. */
+const PEAK_SCALE_MIN = 0.04;
 const PEAK_SCALE_ELEVATION_FACTOR = 0.00001;
-const PEAK_SCALE_MAX = 0.08;
+const PEAK_SCALE_MAX = 0.16;
 
 /** Tree sprite scale, in units of `GLOBE_RADIUS`. */
 const TREE_SCALE = 0.018;

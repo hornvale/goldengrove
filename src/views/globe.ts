@@ -430,7 +430,17 @@ export function createGlobeView(
   const seasonalCtx = systemSeasonalContext(sys);
   const colorAt = (i: number) => activeLens.colorAt(tiles, i, lastDay ?? 0, seasonalCtx);
 
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
+  // Lit (today's directional-terminator) material, and a flat unlit
+  // alternative for a style whose `BaseTreatment.unlit` is true (the flat
+  // pixel-art map look — MeshBasicMaterial ignores lights entirely, so the
+  // vertex colours the lens/treatment computed show exactly as painted, no
+  // day/night shading and no near-zoom lighting blowout). `activeMaterial` is
+  // whichever is current; new tile slots are always built with it, and
+  // `setBaseTreatment` reassigns every already-mounted slot's material when
+  // the style (and thus the unlit flag) changes.
+  const litMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
+  const flatMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
+  let activeMaterial: THREE.Material = litMaterial;
   const tileGridN = TILE_QUADS + 1;
 
   // The globe's surface is a per-tile-CDLOD set of cube-sphere tiles at varying
@@ -562,7 +572,7 @@ export function createGlobeView(
         requestRegion!(t);
       }
     }
-    const mesh = new THREE.Mesh(geom, material);
+    const mesh = new THREE.Mesh(geom, activeMaterial);
     mesh.name = `globe-tile-${key}`;
     spinGroup.add(mesh);
     return { id: t, mesh, geom, idx, colorSrc, baseColor: computeBaseColor(idx, colorSrc), isRegion: region !== undefined };
@@ -889,6 +899,14 @@ export function createGlobeView(
    * geometry's `color` attribute that a lens change does. */
   function setBaseTreatment(treatment: BaseTreatment | null): void {
     activeBaseTreatment = treatment;
+    // Flat pixel-art styles render unlit (flat colour, no terminator/lighting
+    // blowout); switching back to a lit style (photoreal, or any treatment
+    // that leaves `unlit` unset) restores the directional material. Every
+    // already-mounted slot is reassigned immediately — new slots built later
+    // (LOD splits/merges, region upgrades) already pick up `activeMaterial`
+    // via `buildTileSlot`.
+    activeMaterial = treatment?.unlit ? flatMaterial : litMaterial;
+    for (const slot of tileSlots.values()) slot.mesh.material = activeMaterial;
     rebuildBase();
     repaint(lastDay ?? 0, true);
   }
