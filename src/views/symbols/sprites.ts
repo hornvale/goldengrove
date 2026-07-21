@@ -94,3 +94,88 @@ export function buildWaveMaterial(): THREE.SpriteMaterial {
     }
   }, 0xe8f6ff);
 }
+
+/** Volcano glyph: a dark cone with a red/orange lava top — the rarest
+ * biome-signature icon (high unrest atop a high peak). */
+export function buildVolcanoMaterial(): THREE.SpriteMaterial {
+  return buildSymbolMaterial((ctx, size) => {
+    // Dark basalt cone.
+    ctx.fillStyle = 'rgb(48,42,44)';
+    ctx.beginPath();
+    ctx.moveTo(size / 2, size * 0.14);
+    ctx.lineTo(size * 0.86, size * 0.88);
+    ctx.lineTo(size * 0.14, size * 0.88);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgb(20,18,18)';
+    ctx.lineWidth = size * 0.04;
+    ctx.stroke();
+    // Lava glow at the summit.
+    ctx.fillStyle = 'rgb(255,120,30)';
+    ctx.beginPath();
+    ctx.moveTo(size / 2, size * 0.14);
+    ctx.lineTo(size * 0.62, size * 0.32);
+    ctx.lineTo(size * 0.5, size * 0.4);
+    ctx.lineTo(size * 0.38, size * 0.32);
+    ctx.closePath();
+    ctx.fill();
+    // A bright ember core.
+    ctx.fillStyle = 'rgb(255,210,90)';
+    ctx.beginPath();
+    ctx.arc(size / 2, size * 0.26, size * 0.05, 0, Math.PI * 2);
+    ctx.fill();
+  }, 0xff7818);
+}
+
+/** Cactus glyph: a green saguaro — a vertical bar with two arms — marking
+ * desert biome nodes. */
+export function buildCactusMaterial(): THREE.SpriteMaterial {
+  return buildSymbolMaterial((ctx, size) => {
+    ctx.fillStyle = '#3f8f4f';
+    ctx.strokeStyle = '#2c6a3a';
+    ctx.lineWidth = size * 0.03;
+    const trunkW = size * 0.16;
+    // Trunk.
+    ctx.beginPath();
+    ctx.roundRect(size / 2 - trunkW / 2, size * 0.16, trunkW, size * 0.72, trunkW / 2);
+    ctx.fill();
+    ctx.stroke();
+    // Left arm.
+    ctx.beginPath();
+    ctx.roundRect(size * 0.24, size * 0.36, trunkW, size * 0.34, trunkW / 2);
+    ctx.fill();
+    ctx.stroke();
+    // Right arm.
+    ctx.beginPath();
+    ctx.roundRect(size * 0.6, size * 0.28, trunkW, size * 0.34, trunkW / 2);
+    ctx.fill();
+    ctx.stroke();
+  }, 0x3f8f4f);
+}
+
+/** Mushroom glyph: a red, spotted cap on a pale stalk — marking damp,
+ * fungal rainforest biome nodes. */
+export function buildMushroomMaterial(): THREE.SpriteMaterial {
+  return buildSymbolMaterial((ctx, size) => {
+    // Pale stalk.
+    ctx.fillStyle = 'rgb(238,228,208)';
+    ctx.fillRect(size * 0.42, size * 0.5, size * 0.16, size * 0.38);
+    // Red cap.
+    ctx.fillStyle = 'rgb(196,44,44)';
+    ctx.beginPath();
+    ctx.arc(size / 2, size * 0.48, size * 0.36, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    // White spots.
+    ctx.fillStyle = 'rgb(250,246,238)';
+    for (const [dx, dy, r] of [
+      [-0.14, -0.1, 0.055],
+      [0.12, -0.14, 0.05],
+      [0, -0.02, 0.045],
+    ] as const) {
+      ctx.beginPath();
+      ctx.arc(size / 2 + dx * size, size * 0.48 + dy * size, r * size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, 0xc42c2c);
+}
