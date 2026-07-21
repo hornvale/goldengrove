@@ -1,6 +1,3 @@
-import type { BaseTreatment } from '../renderStyle';
-import type { TilesScene } from '../../sim/scene';
-
 /** Channel quantization step — the pixel-art banding used by the DATA-LESS
  * fallback path only (real worlds resolve a curated palette below). */
 export const PIXEL_STEP = 32;
@@ -35,24 +32,22 @@ const PIXEL_LAND_RGB: Readonly<Record<string, readonly [number, number, number]>
   alpine: [172, 166, 154], // warm grey — distinct from ice
 };
 
-/** Data-native pixel base: colour comes from the tile's biome/ocean DATUM, not
- * the lit frame — so land can never take the ocean's colour, and (unlit) no
- * bright biome blows out to white. Ocean is depth-toned; land resolves a
- * curated flat palette by biome name. The quantized-lens path is a fallback
- * only for tiles with no biome data (e.g. headless unit fixtures). */
-export const pixelBaseTreatment: BaseTreatment = {
-  id: 'pixel',
-  unlit: true,
-  transform(rgb, src: TilesScene, idx) {
-    if (src.ocean?.[idx]) {
-      const deep = (src.elevation_m?.[idx] ?? 0) < (src.sea_level_m ?? 0) - OCEAN_DEEP_THRESHOLD_M;
-      const c = deep ? OCEAN_DEEP : OCEAN_SHALLOW;
-      return [c[0], c[1], c[2]];
-    }
-    const name = src.biomeLegend?.[src.biome?.[idx] ?? -1];
-    const land = name ? PIXEL_LAND_RGB[name] : undefined;
-    if (land) return [land[0], land[1], land[2]];
-    // Fallback: no biome data (unit fixtures) — quantize the lens hue.
-    return [quant(rgb[0]), quant(rgb[1]), quant(rgb[2])];
-  },
-};
+/** The curated flat pixel-art colour for tile/region node `idx` of `src`
+ * (biome/ocean datum), 0–255. Reused by the globe base (retired) and the
+ * flat map rung. */
+export function pixelColorFor(
+  rgb: readonly [number, number, number],
+  src: { ocean?: boolean[]; elevation_m?: number[]; sea_level_m?: number; biome?: number[]; biomeLegend?: string[] },
+  idx: number,
+): [number, number, number] {
+  if (src.ocean?.[idx]) {
+    const deep = (src.elevation_m?.[idx] ?? 0) < (src.sea_level_m ?? 0) - OCEAN_DEEP_THRESHOLD_M;
+    const c = deep ? OCEAN_DEEP : OCEAN_SHALLOW;
+    return [c[0], c[1], c[2]];
+  }
+  const name = src.biomeLegend?.[src.biome?.[idx] ?? -1];
+  const land = name ? PIXEL_LAND_RGB[name] : undefined;
+  if (land) return [land[0], land[1], land[2]];
+  // Fallback: no biome data (unit fixtures) — quantize the lens hue.
+  return [quant(rgb[0]), quant(rgb[1]), quant(rgb[2])];
+}

@@ -20,7 +20,6 @@ import {
 } from './worldMesh';
 import type { Lens } from './lens';
 import { naturalLens } from './lens';
-import type { BaseTreatment } from './renderStyle';
 import {
   LOD_CDLOD_MAX_LEVEL,
   LOD_MERGE_FACTOR,
@@ -42,8 +41,6 @@ import { createClouds } from './clouds';
 import { iceFraction } from './ice';
 import { systemSeasonalContext } from '../sim/lockedClimate';
 import { MARGIN as ECLIPSE_MARGIN, bandVisibleAt, buildEclipseBand } from './eclipseBand';
-import type { SymbolLayer } from './symbols/symbolLayer';
-import { rungForZoom } from './symbols/budget';
 
 const TAU = Math.PI * 2;
 
@@ -307,21 +304,6 @@ export interface GlobeView {
    * visual spin only; this one freezes the season only, orthogonal state).
    * Off by default, matching today's un-pinned season. */
   setDayHold(on: boolean): void;
-  /** Swap the active base treatment (a style's per-vertex colour transform
-   * applied on top of the lens colour, e.g. pixel-art's data-native ocean
-   * palette): rebuilds the static base colours and repaints immediately, the
-   * same as `setLens`. `null` restores the untouched lens colour (today's
-   * realistic relief). */
-  setBaseTreatment(treatment: BaseTreatment | null): void;
-  /** Mount The Cartographer's symbol layer (peaks/forests/settlements) into
-   * the spinning group so it turns with the planet, and remember it so
-   * `update` drives its per-frame rung/cull. Replaces any previously mounted
-   * layer without disposing it — callers own their layer's lifecycle. */
-  mountSymbolLayer(layer: SymbolLayer): void;
-  /** Unmount the active symbol layer (if any): removes its group from the
-   * spin group and clears the stored reference. Does not dispose it —
-   * callers own their layer's lifecycle. */
-  unmountSymbolLayer(): void;
 }
 
 /** Diff two tile-leaf sets by key: `added` are `next` tiles whose key was not
@@ -418,11 +400,6 @@ export function createGlobeView(
   // start on whichever lens is active then, not hardcoded to `natural`.
   let activeLens: Lens = naturalLens;
   let lastDay: number | null = null;
-  // The active style's base treatment (e.g. pixel-art's data-native ocean
-  // palette + quantization), applied on top of the lens colour inside
-  // `computeBaseColor` below. `null` = untouched lens colour (today's
-  // realistic relief).
-  let activeBaseTreatment: BaseTreatment | null = null;
   // Built once from the (fixed, for this view's lifetime) system scene —
   // routes a locked tiles document's temperature through the librating-
   // substellar reconstruction (`../sim/lockedClimate`) instead of the
@@ -430,17 +407,7 @@ export function createGlobeView(
   const seasonalCtx = systemSeasonalContext(sys);
   const colorAt = (i: number) => activeLens.colorAt(tiles, i, lastDay ?? 0, seasonalCtx);
 
-  // Lit (today's directional-terminator) material, and a flat unlit
-  // alternative for a style whose `BaseTreatment.unlit` is true (the flat
-  // pixel-art map look — MeshBasicMaterial ignores lights entirely, so the
-  // vertex colours the lens/treatment computed show exactly as painted, no
-  // day/night shading and no near-zoom lighting blowout). `activeMaterial` is
-  // whichever is current; new tile slots are always built with it, and
-  // `setBaseTreatment` reassigns every already-mounted slot's material when
-  // the style (and thus the unlit flag) changes.
-  const litMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
-  const flatMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
-  let activeMaterial: THREE.Material = litMaterial;
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
   const tileGridN = TILE_QUADS + 1;
 
   // The globe's surface is a per-tile-CDLOD set of cube-sphere tiles at varying
@@ -509,10 +476,9 @@ export function createGlobeView(
     const buf = new Float32Array(idx.length * 3);
     for (let v = 0; v < idx.length; v++) {
       const rgb = activeLens.colorAt(src, idx[v]!, lastDay ?? 0, seasonalCtx);
-      const shaded = activeBaseTreatment ? activeBaseTreatment.transform(rgb, src, idx[v]!) : rgb;
-      buf[3 * v] = shaded[0] / 255;
-      buf[3 * v + 1] = shaded[1] / 255;
-      buf[3 * v + 2] = shaded[2] / 255;
+      buf[3 * v] = rgb[0] / 255;
+      buf[3 * v + 1] = rgb[1] / 255;
+      buf[3 * v + 2] = rgb[2] / 255;
     }
     return buf;
   }
@@ -572,7 +538,7 @@ export function createGlobeView(
         requestRegion!(t);
       }
     }
-    const mesh = new THREE.Mesh(geom, activeMaterial);
+    const mesh = new THREE.Mesh(geom, material);
     mesh.name = `globe-tile-${key}`;
     spinGroup.add(mesh);
     return { id: t, mesh, geom, idx, colorSrc, baseColor: computeBaseColor(idx, colorSrc), isRegion: region !== undefined };
@@ -614,8 +580,7 @@ export function createGlobeView(
     for (let v = 0; v < idx.length; v++) {
       let r: number, g: number, b: number;
       if (activeLens.dependsOnDay) {
-        const rgb0 = activeLens.colorAt(src, idx[v]!, day, seasonalCtx);
-        const rgb = activeBaseTreatment ? activeBaseTreatment.transform(rgb0, src, idx[v]!) : rgb0;
+        const rgb = activeLens.colorAt(src, idx[v]!, day, seasonalCtx);
         r = rgb[0] / 255;
         g = rgb[1] / 255;
         b = rgb[2] / 255;
@@ -624,10 +589,7 @@ export function createGlobeView(
         g = base[3 * v + 1]!;
         b = base[3 * v + 2]!;
       }
-      // The dynamic snow/ice blend is a photoreal decoration: under the flat
-      // unlit pixel base it washes cold regions to white (the biome palette's
-      // own `ice` colour already represents ice), so suppress it there.
-      if (icy && !activeBaseTreatment?.unlit) {
+      if (icy) {
         const frac = iceFraction(src, idx[v]!, day, seasonalCtx);
         r += (ICE_COLOR[0] - r) * frac;
         g += (ICE_COLOR[1] - g) * frac;
@@ -895,36 +857,6 @@ export function createGlobeView(
     ocean.object3d.visible = lens.id === naturalLens.id;
   }
 
-  /** Swap the active base treatment: rebuilds the static base colours (now
-   * running through the new treatment inside `computeBaseColor`) and forces
-   * an immediate repaint — the exact same two-call sequence `setLens` uses,
-   * since a treatment change needs the identical push onto the mounted
-   * geometry's `color` attribute that a lens change does. */
-  function setBaseTreatment(treatment: BaseTreatment | null): void {
-    activeBaseTreatment = treatment;
-    // Flat pixel-art styles render unlit (flat colour, no terminator/lighting
-    // blowout); switching back to a lit style (photoreal, or any treatment
-    // that leaves `unlit` unset) restores the directional material. Every
-    // already-mounted slot is reassigned immediately — new slots built later
-    // (LOD splits/merges, region upgrades) already pick up `activeMaterial`
-    // via `buildTileSlot`.
-    activeMaterial = treatment?.unlit ? flatMaterial : litMaterial;
-    for (const slot of tileSlots.values()) slot.mesh.material = activeMaterial;
-    // The ocean's sun-glint and wave motion are photoreal decorations; a flat
-    // pixel-art map wants still, glint-free water (the specular glint blooms to
-    // a white wash over water at near zoom). Suppress both while unlit; restore
-    // on the way back to a lit style.
-    const lit = !treatment?.unlit;
-    setGlint(lit);
-    setWaves(lit);
-    // The translucent water sphere is a photoreal sea surface; on the flat map
-    // the blue ocean TILES already are the sea, and at near zoom the water
-    // sphere's haze washes the view pale. Hide it while unlit.
-    ocean.object3d.visible = lit;
-    rebuildBase();
-    repaint(lastDay ?? 0, true);
-  }
-
   // The water layer: a smooth translucent sphere at sea level, over the
   // displaced seafloor — spinning with the ground so wave motion (stage 2)
   // stays fixed to the world, not the camera.
@@ -1028,21 +960,6 @@ export function createGlobeView(
     selectedGroup = featureName === null ? null : `feature-${featureName}`;
   }
 
-  // The Cartographer's symbol layer (Task 5): mounted/unmounted by the
-  // caller (main.ts owns build/dispose), driven per-frame from `update`
-  // below once a camera is available. `null` until mounted.
-  let activeSymbolLayer: SymbolLayer | null = null;
-  function mountSymbolLayer(layer: SymbolLayer): void {
-    spinGroup.add(layer.group);
-    activeSymbolLayer = layer;
-  }
-  function unmountSymbolLayer(): void {
-    if (activeSymbolLayer) {
-      spinGroup.remove(activeSymbolLayer.group);
-      activeSymbolLayer = null;
-    }
-  }
-
   // Task 9's seasonal hold: freezes spinGroup's diurnal spin at the fast
   // clock rates so a year is watchable with the planet holding a face — see
   // `seasonalSpinZ`'s doc comment. Off by default, matching today's spin.
@@ -1101,21 +1018,6 @@ export function createGlobeView(
     }
     reselect(camera); // per-tile CDLOD; reconciles the leaf set (enqueues, retires)
     drainBuildQueue(); // build a few queued tiles this frame (amortized, hole-free)
-    if (activeSymbolLayer) {
-      // `localCam` was just refreshed by `reselect` above: the camera
-      // expressed in the spinning globe's LOCAL (unspun) frame — the same
-      // frame `latLonToUnit` placed every symbol sprite's `userData.up` in
-      // (mirroring how `markers` above rotate their local `up` INTO world
-      // space to compare against world-space `camera.position`; here it's
-      // cheaper to go the other way and compare two local-frame vectors,
-      // which is equivalent since `onNearSide` only cares about the angle
-      // between them). Camera distance from the globe centre is frame-
-      // invariant (rotation preserves length), so `camera.position.length()`
-      // works directly for the rung calculation.
-      const camDistance = camera.position.length();
-      const rung = rungForZoom(Math.acos(Math.min(1, GLOBE_RADIUS / camDistance)));
-      activeSymbolLayer.update(rung, localCam);
-    }
     for (const m of markers) {
       upWorld.copy(m.up).applyAxisAngle(zAxis, spinGroup.rotation.z);
       const near = onNearSide(upWorld, camera.position, GLOBE_RADIUS);
@@ -1141,9 +1043,6 @@ export function createGlobeView(
     setSeasonalHold,
     setDayHold,
     onRegion,
-    setBaseTreatment,
-    mountSymbolLayer,
-    unmountSymbolLayer,
   };
 }
 
