@@ -22,7 +22,7 @@ import { containingTile, TILE_QUADS, tileKey, type TileId } from './views/cubeSp
 import { createMapView } from './views/mapView';
 import { lensById, naturalLens } from './views/lens';
 import { StylePipeline, styleById } from './views/renderStyle';
-import { ZoomController, dollyLookAt, dollyPosition, wheelHandoff, type ZoomTarget } from './views/zoom';
+import { ZoomController, dollyLookAt, dollyPosition, type ZoomTarget } from './views/zoom';
 import { SPEED_POLICY, SpeedMemory, clampMult, reconcileDayHold } from './time/speedPolicy';
 import type { EclipsesScene, MoonsScene, NeighborsScene, RegionScene, SystemScene, TilesScene } from './sim/scene';
 import { defaultAppState, parseAppState, seedError, serializeAppState, type AppState } from './state/url';
@@ -337,11 +337,7 @@ function mountViews(
     setCaptionFor(view);
   }
   function setViewButtonFor(v: ZoomTarget): void {
-    if (v === 'map') {
-      hud.setViewButton('view: globe', true); // wheel-out returns to the globe, not the system
-      return;
-    }
-    hud.setViewButton(v === 'system' ? 'view: globe' : 'view: system', true);
+    hud.setView(v); // the dropdown reflects the current view
   }
 
   /** Applies the current rung's true-scale state to its view, camera limits,
@@ -388,59 +384,30 @@ function mountViews(
   resize();
   window.addEventListener('resize', resize);
 
-  // Wheel-through: wheeling into a rung's dolly limit is a request to cross
-  // the altitude ladder rather than just a zoom (src/views/zoom.ts).
-  // `distance` is passed in rather than read off the controls, so this works
-  // for both control types (OrbitControls has getDistance(); ArcballControls
-  // does not — its distance is the camera-to-target span).
-  function maybeHandoff(
-    deltaY: number,
-    controls: { enabled: boolean; minDistance: number; maxDistance: number },
-    distance: number,
-  ): void {
-    // Only a rung at rest may hand off: during the 1.5 s transition the
-    // inactive rung's controls are disabled and its camera pose is frozen
-    // wherever it was parked — evaluating that stale distance would let a
-    // continued scroll whipsaw the transition back mid-flight.
-    if (!controls.enabled) return;
-    const intent = wheelHandoff(view, deltaY, distance, controls.minDistance, controls.maxDistance);
-    if (intent === 'to-globe' || intent === 'to-system') {
-      toggleView();
-    } else if (intent === 'to-map') {
-      // Sub-camera point on the globe, in the UNSPUN cube-sphere frame: undo
-      // the seasonal spin so the region requested matches the surface actually
-      // under the camera's look direction, not its spun-away former position.
-      const dir = globeCamera.position.clone().sub(globeControls.target).normalize();
+  /** Requests the map rung's region tile for whatever the globe camera is
+   * currently looking at — called on every explicit switch into the map
+   * view (the dropdown; the wheel-driven handoff that used to trigger this
+   * is retired). Sub-camera point on the globe, in the UNSPUN cube-sphere
+   * frame: undo the seasonal spin so the region requested matches the
+   * surface actually under the camera's look direction, not its spun-away
+   * former position. Never throws: a boot straight into the map rung (the
+   * globe never oriented, or its camera parked exactly on the arcball
+   * target) falls back to a default tile rather than dividing by a
+   * zero-length offset. */
+  function enterMapRegion(): void {
+    const offset = globeCamera.position.clone().sub(globeControls.target);
+    let tile: TileId;
+    if (offset.lengthSq() > 1e-12) {
+      const dir = offset.normalize();
       const spin = seasonalSpinZ(system, day, seasonalHoldOn);
       dir.applyAxisAngle(new THREE.Vector3(0, 0, 1), -spin);
-      const tile = containingTile([dir.x, dir.y, dir.z], 3);
-      pendingMapKey = tileKey(tile);
-      requestRegion(tile); // reply routes via boot -> deliverRegion
-      applyView('map');
-    } else if (intent === 'to-globe-from-map') {
-      applyView('globe');
+      tile = containingTile([dir.x, dir.y, dir.z], 3);
+    } else {
+      tile = containingTile([0, 0, 1], 3);
     }
+    pendingMapKey = tileKey(tile);
+    requestRegion(tile); // reply routes via boot -> deliverRegion
   }
-  systemCanvas.addEventListener(
-    'wheel',
-    (e) => maybeHandoff(e.deltaY, systemControls, systemControls.getDistance()),
-    { passive: true },
-  );
-  globeCanvas.addEventListener(
-    'wheel',
-    (e) => maybeHandoff(e.deltaY, globeControls, globeCamera.position.distanceTo(globeControls.target)),
-    { passive: true },
-  );
-  // The map rung has no OrbitControls of its own yet, so its wheel-out
-  // handoff is a plain view check rather than going through maybeHandoff's
-  // controls-based distance math.
-  mapCanvas.addEventListener(
-    'wheel',
-    (e) => {
-      if (view === 'map' && e.deltaY > 0) applyView('globe');
-    },
-    { passive: true },
-  );
 
   const hudRoot = document.createElement('div');
   app.append(hudRoot);
@@ -468,6 +435,7 @@ function mountViews(
     setViewButtonFor(view);
     setCanvasPointerEvents(v);
     applyTrueScale();
+    if (v === 'map') enterMapRegion();
   }
 
   /** Only the active rung's canvas takes pointer input — the others (including
@@ -499,11 +467,6 @@ function mountViews(
     const urlView = view === 'map' ? 'globe' : view;
     const hash = serializeAppState({ seed: state.seed, view: urlView, day });
     if (location.hash !== hash) history.replaceState(null, '', hash);
-  }
-
-  function toggleView(): void {
-    applyView(view === 'system' ? 'globe' : 'system');
-    syncUrl(true);
   }
 
   function renderFrame(): void {
@@ -625,7 +588,10 @@ function mountViews(
       renderFrame();
       syncUrl(true);
     },
-    onToggleView: toggleView,
+    onView: (v) => {
+      applyView(v);
+      syncUrl(true);
+    },
     onScrub(scrubbedDay) {
       day = Math.floor(day / system.world.yearDays) * system.world.yearDays + scrubbedDay;
       playStartMs = performance.now();
