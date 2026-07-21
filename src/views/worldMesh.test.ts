@@ -11,7 +11,7 @@ import {
   tileIndex,
 } from './worldMesh';
 import type { RegionScene } from '../sim/scene';
-import { naturalLens } from './lens';
+import { majorWaterColor, naturalLens } from './lens';
 import { elevationColor } from '../sim/palette';
 import { biomeColorForName } from './biomePalette';
 import { loadSeed42Tiles } from '../testHelpers/wasmFixture';
@@ -347,12 +347,14 @@ describe('analytic normals (buildGridGeometry)', () => {
 });
 
 describe('the natural lens (behavior-preservation regression)', () => {
-  it('the natural lens reproduces the pre-refactor colors tile for tile', async () => {
+  it('the natural lens reproduces ocean/biome colors tile for tile, except major water overrides (The Freshwater)', async () => {
     const tiles = await loadSeed42Tiles(64);
     for (let i = 0; i < tiles.width * tiles.height; i++) {
-      const expected = tiles.ocean[i]
-        ? elevationColor(tiles.elevation_m[i]!, tiles.sea_level_m)
-        : biomeColorForName(tiles.biomeLegend[tiles.biome[i]!] ?? '');
+      const expected =
+        majorWaterColor(tiles, i) ??
+        (tiles.ocean[i]
+          ? elevationColor(tiles.elevation_m[i]!, tiles.sea_level_m)
+          : biomeColorForName(tiles.biomeLegend[tiles.biome[i]!] ?? ''));
       expect(naturalLens.colorAt(tiles, i, 0)).toEqual(expected);
     }
   });

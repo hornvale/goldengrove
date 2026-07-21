@@ -15,6 +15,7 @@ import { HEX, sequential, diverging } from './colormap';
 import type { SeasonalContext } from '../sim/lockedClimate';
 import { lensTemperatureAt } from '../sim/lockedClimate';
 import { PLATE_BOUNDARY, PLATE_SLOTS, colorPlates, isBoundaryTile } from './plateColoring';
+import { RIVER_BASE, LAKE_TONE } from './styles/pixelBase';
 
 /** Default seasonal context for callers with no system scene in hand
  * (legend previews, tests) — a spinning-equivalent no-op (`temperatureAt`
@@ -52,6 +53,40 @@ export interface Lens {
   legend(tiles: TilesScene): LegendEntry[];
 }
 
+/** Drainage bar a river/lake must clear to show on the globe overview (The
+ * Freshwater, Stage 4): the map already shows every river and salt-basin
+ * tile, but the globe is the clean overview, so only the biggest features
+ * (the ones a reader would call "the river", "the lake") earn a pixel there
+ * — a creek would just be noise at that scale. Both bars are read on the
+ * globe's own coarse 256-wide tile grid, where drainage accumulates to
+ * higher values than on the map's finer grid; visual-pass-tuned, not
+ * derived from the producer's field. */
+const GLOBE_RIVER_DRAINAGE_MIN = 40;
+/** Drainage bar for `salt-basin` (lake) tiles on the globe — see
+ * `GLOBE_RIVER_DRAINAGE_MIN`. Lower than the river bar because a lake's
+ * drainage is a pooled, not accumulated-downstream, quantity. */
+const GLOBE_LAKE_DRAINAGE_MIN = 20;
+
+/** The globe overview shows only MAJOR inland water — a river/lake tile whose
+ * drainage clears the threshold — so the clean overview isn't cluttered by
+ * every creek. Returns the water RGB for a qualifying LAND tile, or null. */
+export function majorWaterColor(tiles: TilesScene, i: number): RGB | null {
+  if (tiles.ocean[i]) return null;
+  if (!tiles.water || !tiles.waterLegend || !tiles.drainage) return null;
+  const waterClass = tiles.water[i];
+  if (waterClass === undefined) return null;
+  const drainage = tiles.drainage[i] ?? 0;
+  const riverIndex = tiles.waterLegend.indexOf('river');
+  if (riverIndex >= 0 && waterClass === riverIndex && drainage >= GLOBE_RIVER_DRAINAGE_MIN) {
+    return [RIVER_BASE[0], RIVER_BASE[1], RIVER_BASE[2]];
+  }
+  const saltBasinIndex = tiles.waterLegend.indexOf('salt-basin');
+  if (saltBasinIndex >= 0 && waterClass === saltBasinIndex && drainage >= GLOBE_LAKE_DRAINAGE_MIN) {
+    return [LAKE_TONE[0], LAKE_TONE[1], LAKE_TONE[2]];
+  }
+  return null;
+}
+
 /** Today's view, unchanged: ocean tiles shaded by depth, land by biome. */
 export const naturalLens: Lens = {
   id: 'natural',
@@ -60,9 +95,10 @@ export const naturalLens: Lens = {
     'ocean shaded by depth, land by biome — a rendering choice, not a photograph: the sim ships numbers, not colors.',
   dependsOnDay: false,
   colorAt(tiles, i) {
-    return tiles.ocean[i]
-      ? elevationColor(tiles.elevation_m[i]!, tiles.sea_level_m)
-      : biomeColorForName(tiles.biomeLegend[tiles.biome[i]!] ?? '');
+    if (tiles.ocean[i]) return elevationColor(tiles.elevation_m[i]!, tiles.sea_level_m);
+    const water = majorWaterColor(tiles, i);
+    if (water) return water;
+    return biomeColorForName(tiles.biomeLegend[tiles.biome[i]!] ?? '');
   },
   legend(tiles) {
     const rows: LegendEntry[] = [
