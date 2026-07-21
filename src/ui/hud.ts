@@ -2,6 +2,7 @@ import { LENSES, type Lens, type LegendEntry } from '../views/lens';
 import { STYLES, type RenderStyle } from '../views/renderStyle';
 import type { EclipseEvent } from '../sim/scene';
 import { eclipseMarkPositions } from './eclipseMarks';
+import type { ZoomTarget } from '../views/zoom';
 
 export const SPEED_STEPS: Array<{ label: string; mult: number }> = [
   { label: '1×', mult: 1 },
@@ -19,7 +20,8 @@ export interface HudCallbacks {
   onReroll(): void;
   onShare(): void;
   onDateJump(year: number, dayOfYear: number): void;
-  onToggleView(): void;
+  /** The viewer picked a view from the HUD's System/Globe/Map dropdown. */
+  onView(v: ZoomTarget): void;
   /** The day scrubber was dragged to `day` (raw ephemeris day units, not a
    * calendar date) — the caller repositions the view and rebases autoplay
    * from here. */
@@ -69,7 +71,10 @@ export interface Hud {
   setPaused(paused: boolean): void;
   flashShared(): void;
   setActiveSpeed(mult: number): void;
-  setViewButton(label: string, visible: boolean): void;
+  /** Reflects the current view in the System/Globe/Map dropdown, without
+   * firing `onView` (the controller driving the view, not the viewer
+   * picking one). */
+  setView(v: ZoomTarget): void;
   setMaxSpeed(maxMult: number | null): void;
   setTrueScaleLabel(label: string): void;
   setTrueScaleActive(on: boolean): void;
@@ -132,11 +137,24 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
   const share = el('button', '', 'share');
   share.addEventListener('click', () => cb.onShare());
   topLeft.append(reroll, trueScale, share);
-  const viewToggle = el('button', '', '');
-  (viewToggle as HTMLButtonElement).name = 'view-toggle';
-  viewToggle.style.display = 'none';
-  viewToggle.addEventListener('click', () => cb.onToggleView());
-  topLeft.append(viewToggle);
+  // The Vantage: an explicit System/Globe/Map dropdown replaces the old
+  // zoom-driven single toggle button — the viewer picks a view directly
+  // rather than stepping through a ladder one click at a time.
+  const viewSelect = el('select', 'hud-view');
+  viewSelect.name = 'view-select';
+  const viewOptions: Array<{ value: ZoomTarget; label: string }> = [
+    { value: 'system', label: 'System' },
+    { value: 'globe', label: 'Globe' },
+    { value: 'map', label: 'Map' },
+  ];
+  for (const opt of viewOptions) {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    viewSelect.appendChild(o);
+  }
+  viewSelect.addEventListener('change', () => cb.onView(viewSelect.value as ZoomTarget));
+  topLeft.append(viewSelect);
 
   const topRight = el('div', 'hud hud-top-right');
   const date = el('span', '', '—');
@@ -310,10 +328,7 @@ export function buildHud(root: HTMLElement, seed: string, cb: HudCallbacks): Hud
     setActiveSpeed: (mult) => {
       speedButtons.forEach((b, i) => b.classList.toggle('active', SPEED_STEPS[i]!.mult === mult));
     },
-    setViewButton: (label, visible) => {
-      viewToggle.textContent = label;
-      viewToggle.style.display = visible ? '' : 'none';
-    },
+    setView: (v) => { viewSelect.value = v; },
     setMaxSpeed: (maxMult) => {
       speedButtons.forEach((b, i) => {
         b.disabled = maxMult !== null && SPEED_STEPS[i]!.mult > maxMult;

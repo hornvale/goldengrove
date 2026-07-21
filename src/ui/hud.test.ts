@@ -3,9 +3,10 @@ import { buildHud, SPEED_STEPS } from './hud';
 import { LENSES, moistureLens } from '../views/lens';
 import { photorealStyle } from '../views/renderStyle';
 import type { EclipseEvent } from '../sim/scene';
+import type { ZoomTarget } from '../views/zoom';
 
 describe('buildHud interactions', () => {
-  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onToggleView() {}, onScrub(_: number) {}, onLens(_: string) {}, onStyle(_: string) {}, onWinds() {}, onCurrents() {}, onClouds() {}, onEclipseMark(_: EclipseEvent) {}, onFreezeSpin() {}, onDayHold() {}, onWaves() {}, onGlint() {}, onNightFill() {} };
+  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onView(_: ZoomTarget) {}, onScrub(_: number) {}, onLens(_: string) {}, onStyle(_: string) {}, onWinds() {}, onCurrents() {}, onClouds() {}, onEclipseMark(_: EclipseEvent) {}, onFreezeSpin() {}, onDayHold() {}, onWaves() {}, onGlint() {}, onNightFill() {} };
 
   it('share button fires onShare and flashes', () => {
     const root = document.createElement('div');
@@ -113,17 +114,26 @@ describe('buildHud interactions', () => {
     expect(scrub.max).toBe('368.05357');
   });
 
-  it('view-toggle button is controllable', () => {
+  it('view dropdown offers System/Globe/Map and reports the chosen view', () => {
     const root = document.createElement('div');
-    let toggles = 0;
-    const hud = buildHud(root, '42', { ...noop, onToggleView: () => { toggles++; } });
-    const btn = root.querySelector('button[name="view-toggle"]') as HTMLButtonElement;
-    expect(btn.style.display).toBe('none'); // hidden until controller decides
-    hud.setViewButton('⏚ stand here', true);
-    expect(btn.style.display).toBe('');
-    expect(btn.textContent).toBe('⏚ stand here');
-    btn.click();
-    expect(toggles).toBe(1);
+    const chosen: ZoomTarget[] = [];
+    buildHud(root, '42', { ...noop, onView: (v: ZoomTarget) => { chosen.push(v); } });
+    const select = root.querySelector('select[name="view-select"]') as HTMLSelectElement;
+    const values = [...select.options].map((o) => o.value);
+    expect(values).toEqual(['system', 'globe', 'map']);
+    select.value = 'map';
+    select.dispatchEvent(new Event('change'));
+    expect(chosen).toEqual(['map']);
+  });
+
+  it('setView reflects the current view without firing onView', () => {
+    const root = document.createElement('div');
+    let calls = 0;
+    const hud = buildHud(root, '42', { ...noop, onView: () => { calls++; } });
+    const select = root.querySelector('select[name="view-select"]') as HTMLSelectElement;
+    hud.setView('globe');
+    expect(select.value).toBe('globe');
+    expect(calls).toBe(0);
   });
 
   it('offers a button per registered lens, with no per-lens special-casing', () => {
