@@ -33,15 +33,29 @@ export function lerpVector3(a: THREE.Vector3, b: THREE.Vector3, t: number): THRE
 /** How long a system<->globe zoom transition takes, in milliseconds. */
 export const ZOOM_DURATION_MS = 1500;
 
-export type ZoomTarget = 'system' | 'globe';
+export type ZoomTarget = 'system' | 'globe' | 'map';
+
+/** Each rung's position on the ladder — the value `ZoomController.valueAt`
+ * eases toward. Ordered altitude descent: system (0) → globe (1) → map (2). */
+export const RUNG_INDEX: Record<ZoomTarget, number> = { system: 0, globe: 1, map: 2 };
 
 /** The zoom's continuous state at a given moment: how far the transition
- * has eased toward `target` (0 = fully system, 1 = fully globe), and the
- * per-canvas opacities a caller cross-fades with. */
+ * has eased along the ladder (0 = fully system, 1 = fully globe, 2 = fully
+ * map), and the per-canvas opacities a caller cross-fades with. */
 export interface ZoomState {
   value: number;
   systemOpacity: number;
   globeOpacity: number;
+  mapOpacity: number;
+}
+
+/** The three canvases' cross-fade opacities at ladder position `pos`: each
+ * rung is a triangular tent centered on its own `RUNG_INDEX`, fully opaque
+ * at its center and fully transparent one whole rung away, so adjacent
+ * rungs cross-fade linearly and non-adjacent rungs never overlap. */
+export function opacitiesFor(pos: number): Omit<ZoomState, 'value'> {
+  const tri = (center: number) => Math.max(0, 1 - Math.abs(pos - center));
+  return { systemOpacity: tri(0), globeOpacity: tri(1), mapOpacity: tri(2) };
 }
 
 /** Drives one system<->globe transition over `durationMs`. Retargeting
@@ -74,13 +88,13 @@ export class ZoomController {
    * lie about history that never happened. */
   jumpTo(target: ZoomTarget): void {
     this.target = target;
-    this.fromValue = target === 'globe' ? 1 : 0;
+    this.fromValue = RUNG_INDEX[target];
     this.transitionStartMs = 0;
   }
 
-  /** The eased [0,1] position toward `target` at `nowMs`. */
+  /** The eased ladder position toward `target` at `nowMs`. */
   valueAt(nowMs: number): number {
-    const goal = this.target === 'globe' ? 1 : 0;
+    const goal = RUNG_INDEX[this.target];
     const raw = this.durationMs <= 0 ? 1 : (nowMs - this.transitionStartMs) / this.durationMs;
     return lerp(this.fromValue, goal, easeInOutCubic(raw));
   }
@@ -88,7 +102,7 @@ export class ZoomController {
   /** The full state (value + opacities) at `nowMs`. */
   stateAt(nowMs: number): ZoomState {
     const value = this.valueAt(nowMs);
-    return { value, systemOpacity: 1 - value, globeOpacity: value };
+    return { value, ...opacitiesFor(value) };
   }
 }
 
@@ -118,7 +132,7 @@ export function dollyLookAt(worldPos: THREE.Vector3, value: number): THREE.Vecto
  * to ascend to the system. Anywhere else it is just a zoom. `deltaY` uses
  * DOM convention (negative = zoom in). The 1% tolerance absorbs
  * OrbitControls' damping never quite parking exactly on its limit. */
-export type HandoffIntent = 'to-globe' | 'to-system' | null;
+export type HandoffIntent = 'to-globe' | 'to-system' | 'to-map' | 'to-globe-from-map' | null;
 
 export function wheelHandoff(
   view: ZoomTarget,
@@ -129,5 +143,7 @@ export function wheelHandoff(
 ): HandoffIntent {
   if (view === 'system' && deltaY < 0 && distance <= minDistance * 1.01) return 'to-globe';
   if (view === 'globe' && deltaY > 0 && distance >= maxDistance * 0.99) return 'to-system';
+  if (view === 'globe' && deltaY < 0 && distance <= minDistance * 1.01) return 'to-map';
+  if (view === 'map' && deltaY > 0 && distance >= maxDistance * 0.99) return 'to-globe-from-map';
   return null;
 }

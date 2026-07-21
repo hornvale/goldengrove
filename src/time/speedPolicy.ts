@@ -14,6 +14,9 @@ export interface RungPolicy { defaultMult: number; maxMult: number | null }
 export const SPEED_POLICY: Record<ZoomTarget, RungPolicy> = {
   system: { defaultMult: 2.6e6, maxMult: null },
   globe: { defaultMult: 3600, maxMult: 2.6e6 },
+  // TODO(map-rung): Task 4 wires the real map view; stub with the globe's
+  // policy for now so ZoomTarget stays total.
+  map: { defaultMult: 3600, maxMult: 2.6e6 },
 };
 
 /** `mult` clamped to `view`'s cap. */

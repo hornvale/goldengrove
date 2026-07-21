@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, test } from 'vitest';
 import * as THREE from 'three';
-import { dollyLookAt, dollyPosition, easeInOutCubic, lerp, lerpVector3, wheelHandoff, ZoomController } from './zoom';
+import {
+  dollyLookAt,
+  dollyPosition,
+  easeInOutCubic,
+  lerp,
+  lerpVector3,
+  opacitiesFor,
+  wheelHandoff,
+  ZoomController,
+} from './zoom';
 
 describe('easeInOutCubic', () => {
   it('is 0 at 0 and 1 at 1', () => {
@@ -46,7 +55,7 @@ describe('lerpVector3', () => {
 describe('ZoomController', () => {
   it('starts fully at system (value 0)', () => {
     const z = new ZoomController(1000);
-    expect(z.stateAt(0)).toEqual({ value: 0, systemOpacity: 1, globeOpacity: 0 });
+    expect(z.stateAt(0)).toEqual({ value: 0, systemOpacity: 1, globeOpacity: 0, mapOpacity: 0 });
   });
   it('eases fully to globe once the duration elapses, and clamps past it', () => {
     const z = new ZoomController(1000);
@@ -78,8 +87,35 @@ describe('ZoomController', () => {
   it('jumpTo snaps with no transition', () => {
     const z = new ZoomController(1000);
     z.jumpTo('globe');
-    expect(z.stateAt(0)).toEqual({ value: 1, systemOpacity: 0, globeOpacity: 1 });
+    expect(z.stateAt(0)).toEqual({ value: 1, systemOpacity: 0, globeOpacity: 1, mapOpacity: 0 });
     expect(z.currentTarget()).toBe('globe');
+  });
+});
+
+describe('three-rung ladder (map)', () => {
+  test('ladder position eases toward the target rung index', () => {
+    const z = new ZoomController(1000);
+    z.jumpTo('globe');
+    expect(z.valueAt(0)).toBeCloseTo(1);
+    z.setTarget('map', 0);
+    expect(z.valueAt(500)).toBeGreaterThan(1);
+    expect(z.valueAt(1000)).toBeCloseTo(2);
+  });
+
+  test('opacities cross-fade the three canvases across the ladder', () => {
+    expect(opacitiesFor(0)).toMatchObject({ systemOpacity: 1, globeOpacity: 0, mapOpacity: 0 });
+    expect(opacitiesFor(1)).toMatchObject({ systemOpacity: 0, globeOpacity: 1, mapOpacity: 0 });
+    expect(opacitiesFor(2)).toMatchObject({ systemOpacity: 0, globeOpacity: 0, mapOpacity: 1 });
+    const mid = opacitiesFor(1.5);
+    expect(mid.globeOpacity).toBeCloseTo(0.5);
+    expect(mid.mapOpacity).toBeCloseTo(0.5);
+    expect(mid.systemOpacity).toBe(0);
+  });
+
+  test('wheelHandoff crosses globe<->map at the dolly limits', () => {
+    expect(wheelHandoff('globe', -1, 1.0, 1.0, 10)).toBe('to-map');
+    expect(wheelHandoff('map', 1, 9.99, 1.0, 10)).toBe('to-globe-from-map');
+    expect(wheelHandoff('system', -1, 1.0, 1.0, 10)).toBe('to-globe');
   });
 });
 

@@ -259,7 +259,7 @@ function mountViews(
   // Per-rung true-scale state (Task 8): each rung remembers its own toggle
   // independently, so switching rungs re-presents whichever state that rung
   // was left in.
-  const trueScaleOn: Record<ZoomTarget, boolean> = { system: false, globe: false };
+  const trueScaleOn: Record<ZoomTarget, boolean> = { system: false, globe: false, map: false };
 
   // The wind overlay is a single globe-wide toggle (not per-rung like
   // true-scale): it starts hidden, matching `createWinds`'s built geometry.
@@ -374,7 +374,10 @@ function mountViews(
     // continued scroll whipsaw the transition back mid-flight.
     if (!controls.enabled) return;
     const intent = wheelHandoff(view, deltaY, distance, controls.minDistance, controls.maxDistance);
-    if (intent) {
+    // toggleView only knows system<->globe; the map rung isn't wired yet
+    // (Task 4), so 'to-map'/'to-globe-from-map' are no-ops for now rather
+    // than mis-toggling into a view nothing renders.
+    if (intent === 'to-globe' || intent === 'to-system') {
       toggleView();
     }
   }
@@ -428,7 +431,12 @@ function mountViews(
     const now = performance.now();
     if (!force && now - lastUrlSyncMs < 1000) return;
     lastUrlSyncMs = now;
-    const hash = serializeAppState({ seed: state.seed, view, day });
+    // TODO(map-rung): Task 4 persists the map rung in AppState/the URL; until
+    // then `view` never actually reaches 'map' (maybeHandoff below no-ops on
+    // the new intents), but this keeps `serializeAppState`'s narrower type
+    // total rather than widening the URL contract ahead of that wiring.
+    const urlView = view === 'map' ? 'globe' : view;
+    const hash = serializeAppState({ seed: state.seed, view: urlView, day });
     if (location.hash !== hash) history.replaceState(null, '', hash);
   }
 
