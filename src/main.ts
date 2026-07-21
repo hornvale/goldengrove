@@ -17,13 +17,14 @@ import { eclipseInfo, moonInfo, namedTarget, siteInfo, starInfo, worldInfo } fro
 import { clockToDay } from './time/clock';
 import { dayToRawDate, formatRawDate, rawDateToDay } from './time/calendar';
 import { createSystemView } from './views/system';
-import { createGlobeView, RELIEF_EXAGGERATION, type GlobeView } from './views/globe';
-import { TILE_QUADS, tileKey, type TileId } from './views/cubeSphere';
+import { createGlobeView, RELIEF_EXAGGERATION, seasonalSpinZ, type GlobeView } from './views/globe';
+import { containingTile, TILE_QUADS, tileKey, type TileId } from './views/cubeSphere';
+import { createMapView } from './views/mapView';
 import { lensById, naturalLens } from './views/lens';
 import { StylePipeline, styleById } from './views/renderStyle';
 import { ZoomController, dollyLookAt, dollyPosition, wheelHandoff, type ZoomTarget } from './views/zoom';
 import { SPEED_POLICY, SpeedMemory, clampMult, reconcileDayHold } from './time/speedPolicy';
-import type { EclipsesScene, MoonsScene, NeighborsScene, SystemScene, TilesScene } from './sim/scene';
+import type { EclipsesScene, MoonsScene, NeighborsScene, RegionScene, SystemScene, TilesScene } from './sim/scene';
 import { defaultAppState, parseAppState, seedError, serializeAppState, type AppState } from './state/url';
 import { randomSeed } from './ui/seed';
 import type { WorkerErrorKind } from './sim/worker';
@@ -46,6 +47,7 @@ const TRUE_GROUND_CAPTION = `relief at true scale (1×): the mountains are down 
 const SEASONAL_HOLD_CAPTION =
   'holding the daily spin — watching the year: the sub-solar latitude and ice line keep advancing with the season while the globe holds a face.';
 const DAY_HOLD_CAPTION = 'holding the season — watch a day';
+const MAP_CAPTION = 'the flat map: a region, drawn.';
 
 /** The pre-Task-8 globe speed cap (`SPEED_POLICY`'s old `maxMult`, still the
  * threshold above which the daily spin is a blur, not the current one —
@@ -123,12 +125,16 @@ function boot(): void {
   // The mounted globe, captured so region-tile replies (LOD stage 4) route to
   // it — the worker serves those from the persisted post-genesis catalog.
   let globe: GlobeView | null = null;
+  // The mounted views' region router (also feeds the map rung's placeholder
+  // quad, Task 4) — set alongside `globe` the moment `mountViews` returns.
+  let views: { globe: GlobeView; deliverRegion: (key: string, region: RegionScene) => void } | null = null;
   worker.onmessage = (ev: MessageEvent) => {
     const msg = ev.data;
     if (msg.type === 'world') {
-      globe = mountViews(msg.system, msg.moons, msg.neighbors, msg.tiles, msg.eclipses, state, worker);
+      views = mountViews(msg.system, msg.moons, msg.neighbors, msg.tiles, msg.eclipses, state, worker);
+      globe = views.globe;
     } else if (msg.type === 'region') {
-      globe?.onRegion(msg.key, msg.region);
+      views?.deliverRegion(msg.key, msg.region);
     } else if (msg.type === 'region-error') {
       // Non-fatal: the tile keeps its interpolated form. (Left uncleared so a
       // persistently-failing region isn't re-requested every rebuild.)
@@ -150,7 +156,7 @@ function mountViews(
   eclipses: EclipsesScene,
   state: AppState,
   worker: Worker,
-): GlobeView {
+): { globe: GlobeView; deliverRegion: (key: string, region: RegionScene) => void } {
   app.innerHTML = '';
 
   const stage = document.createElement('div');
@@ -159,7 +165,9 @@ function mountViews(
   systemCanvas.className = 'view-canvas';
   const globeCanvas = document.createElement('canvas');
   globeCanvas.className = 'view-canvas';
-  stage.append(systemCanvas, globeCanvas);
+  const mapCanvas = document.createElement('canvas');
+  mapCanvas.className = 'view-canvas';
+  stage.append(systemCanvas, globeCanvas, mapCanvas);
   app.append(stage);
 
   const caption = document.createElement('div');
@@ -170,6 +178,12 @@ function mountViews(
   systemRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   const globeRenderer = new THREE.WebGLRenderer({ canvas: globeCanvas, antialias: true });
   globeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const mapRenderer = new THREE.WebGLRenderer({ canvas: mapCanvas, antialias: true });
+  mapRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  // The map view: the flat pixel-art rung below the globe (Task 4 wires it
+  // in; the region quad itself is still a placeholder, Stage 3).
+  const mapView = createMapView();
 
   // The system view: the schematic AU-scale orrery (Task 8).
   const systemScene = new THREE.Scene();
@@ -256,6 +270,12 @@ function mountViews(
   let view: ZoomTarget = state.view;
   zoom.jumpTo(view); // the initial view from a deep link never animates in
 
+  // The region key the map rung is waiting on (set by the globe->map
+  // handoff's requestRegion call, consumed by deliverRegion below) — null
+  // when the map isn't expecting a reply (e.g. a repeat visit already
+  // holding a cached region).
+  let pendingMapKey: string | null = null;
+
   // Per-rung true-scale state (Task 8): each rung remembers its own toggle
   // independently, so switching rungs re-presents whichever state that rung
   // was left in.
@@ -297,6 +317,10 @@ function mountViews(
       caption.textContent = trueScaleOn.system ? TRUE_SPACE_CAPTION : SPACE_CAPTION;
       return;
     }
+    if (v === 'map') {
+      caption.textContent = MAP_CAPTION;
+      return;
+    }
     const base = trueScaleOn.globe ? TRUE_GROUND_CAPTION : GROUND_CAPTION;
     const seasonSuffix = seasonalHoldOn ? ` ${SEASONAL_HOLD_CAPTION}` : '';
     const daySuffix = dayHoldOn ? ` ${DAY_HOLD_CAPTION}` : '';
@@ -312,6 +336,10 @@ function mountViews(
     setCaptionFor(view);
   }
   function setViewButtonFor(v: ZoomTarget): void {
+    if (v === 'map') {
+      hud.setViewButton('view: globe', true); // wheel-out returns to the globe, not the system
+      return;
+    }
     hud.setViewButton(v === 'system' ? 'view: globe' : 'view: system', true);
   }
 
@@ -348,6 +376,7 @@ function mountViews(
   function resize(): void {
     systemRenderer.setSize(window.innerWidth, window.innerHeight);
     globeRenderer.setSize(window.innerWidth, window.innerHeight);
+    mapRenderer.setSize(window.innerWidth, window.innerHeight);
     stylePipeline.setSize(window.innerWidth, window.innerHeight);
     const aspect = window.innerWidth / window.innerHeight;
     systemCamera.aspect = aspect;
@@ -374,11 +403,21 @@ function mountViews(
     // continued scroll whipsaw the transition back mid-flight.
     if (!controls.enabled) return;
     const intent = wheelHandoff(view, deltaY, distance, controls.minDistance, controls.maxDistance);
-    // toggleView only knows system<->globe; the map rung isn't wired yet
-    // (Task 4), so 'to-map'/'to-globe-from-map' are no-ops for now rather
-    // than mis-toggling into a view nothing renders.
     if (intent === 'to-globe' || intent === 'to-system') {
       toggleView();
+    } else if (intent === 'to-map') {
+      // Sub-camera point on the globe, in the UNSPUN cube-sphere frame: undo
+      // the seasonal spin so the region requested matches the surface actually
+      // under the camera's look direction, not its spun-away former position.
+      const dir = globeCamera.position.clone().sub(globeControls.target).normalize();
+      const spin = seasonalSpinZ(system, day, seasonalHoldOn);
+      dir.applyAxisAngle(new THREE.Vector3(0, 0, 1), -spin);
+      const tile = containingTile([dir.x, dir.y, dir.z], 3);
+      pendingMapKey = tileKey(tile);
+      requestRegion(tile); // reply routes via boot -> deliverRegion
+      applyView('map');
+    } else if (intent === 'to-globe-from-map') {
+      applyView('globe');
     }
   }
   systemCanvas.addEventListener(
@@ -389,6 +428,16 @@ function mountViews(
   globeCanvas.addEventListener(
     'wheel',
     (e) => maybeHandoff(e.deltaY, globeControls, globeCamera.position.distanceTo(globeControls.target)),
+    { passive: true },
+  );
+  // The map rung has no OrbitControls of its own yet, so its wheel-out
+  // handoff is a plain view check rather than going through maybeHandoff's
+  // controls-based distance math.
+  mapCanvas.addEventListener(
+    'wheel',
+    (e) => {
+      if (view === 'map' && e.deltaY > 0) applyView('globe');
+    },
     { passive: true },
   );
 
@@ -418,6 +467,7 @@ function mountViews(
     setViewButtonFor(view);
     systemCanvas.style.pointerEvents = v === 'system' ? 'auto' : 'none';
     globeCanvas.style.pointerEvents = v === 'globe' ? 'auto' : 'none';
+    mapCanvas.style.pointerEvents = v === 'map' ? 'auto' : 'none';
     applyTrueScale();
   }
 
@@ -431,10 +481,11 @@ function mountViews(
     const now = performance.now();
     if (!force && now - lastUrlSyncMs < 1000) return;
     lastUrlSyncMs = now;
-    // TODO(map-rung): Task 4 persists the map rung in AppState/the URL; until
-    // then `view` never actually reaches 'map' (maybeHandoff below no-ops on
-    // the new intents), but this keeps `serializeAppState`'s narrower type
-    // total rather than widening the URL contract ahead of that wiring.
+    // TODO(map-rung): a later task persists the map rung in AppState/the URL;
+    // until then a deep link into 'map' is represented as 'globe' — this
+    // keeps `serializeAppState`'s narrower type total rather than widening
+    // the URL contract ahead of that wiring (a reload while on the map rung
+    // lands back on the globe, one rung up, rather than erroring).
     const urlView = view === 'map' ? 'globe' : view;
     const hash = serializeAppState({ seed: state.seed, view: urlView, day });
     if (location.hash !== hash) history.replaceState(null, '', hash);
@@ -457,8 +508,14 @@ function mountViews(
       systemControls.update();
       systemFraming = systemCamera.position.clone();
     } else {
-      systemCamera.position.copy(dollyPosition(systemFraming, worldPos, CLOSE_OFFSET, z.value));
-      systemCamera.lookAt(dollyLookAt(worldPos, z.value));
+      // The system<->globe dolly only spans the [0,1] segment of the ladder;
+      // on the globe->map segment `value` runs 1->2, and clamping here holds
+      // the system camera at its closest (globe-arrival) framing while the
+      // map fades in over it, rather than continuing to dolly (nowhere left
+      // to go — the system camera has no notion of the map rung at all).
+      const systemDollyValue = Math.min(z.value, 1);
+      systemCamera.position.copy(dollyPosition(systemFraming, worldPos, CLOSE_OFFSET, systemDollyValue));
+      systemCamera.lookAt(dollyLookAt(worldPos, systemDollyValue));
     }
     globeControls.enabled = z.value === 1;
     if (globeControls.enabled) globeControls.update();
@@ -466,9 +523,11 @@ function mountViews(
 
     systemCanvas.style.opacity = String(z.systemOpacity);
     globeCanvas.style.opacity = String(z.globeOpacity);
+    mapCanvas.style.opacity = String(z.mapOpacity);
 
     systemRenderer.render(systemScene, systemCamera);
     stylePipeline.render();
+    if (z.mapOpacity > 0) mapView.render(mapRenderer);
   }
 
   const cb: HudCallbacks = {
@@ -626,6 +685,12 @@ function mountViews(
   // applyView at that point).
   systemCanvas.style.pointerEvents = view === 'system' ? 'auto' : 'none';
   globeCanvas.style.pointerEvents = view === 'globe' ? 'auto' : 'none';
+  // The map rung is never the initial view — `state.view` (AppState) is
+  // narrower than ZoomTarget and admits only 'system'|'globe' (the map rung
+  // isn't yet a deep-linkable URL state, see syncUrl's TODO above) — so this
+  // is unconditionally hidden at boot, unlike applyView's ternary which runs
+  // after the ladder can actually reach 'map'.
+  mapCanvas.style.pointerEvents = 'none';
   hud.setDayRange(system.world.yearDays);
   hud.setMaxSpeed(SPEED_POLICY[view].maxMult);
   hud.setActiveSpeed(speedMemory.restore(view));
@@ -745,7 +810,17 @@ function mountViews(
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  return globeView;
+
+  /** Routes a worker region reply to whichever mounted view(s) are waiting on
+   * it: the globe always (its own tile-refinement bookkeeping), and the map
+   * additionally when the reply is the one it's currently pending on
+   * (`pendingMapKey`, set by the globe->map handoff above). */
+  function deliverRegion(key: string, region: RegionScene): void {
+    globeView.onRegion(key, region);
+    if (key === pendingMapKey) mapView.setRegion(region);
+  }
+
+  return { globe: globeView, deliverRegion };
 }
 
 boot();
