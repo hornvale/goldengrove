@@ -75,6 +75,8 @@ function tinyTiles(): TilesScene {
     precipMmYr: Array(n).fill(800), snowFraction: Array(n).fill(0.1),
     precipRegime: Array(n).fill(0), cloudFraction: Array(n).fill(0.4),
     weatherPropensity: Array(n).fill(0.6), cloudType: Array(n).fill(0),
+    water: Array(n).fill(3), waterLegend: ['ocean', 'salt-basin', 'river', 'dry-land'],
+    drainage: Array(n).fill(0), waterfalls: [],
   };
 }
 

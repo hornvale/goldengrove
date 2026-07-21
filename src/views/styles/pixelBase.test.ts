@@ -37,3 +37,55 @@ test('ocean is depth-toned: deep is a darker blue than shallow', () => {
   expect(deep[2]).toBeGreaterThan(deep[0]); // blue-dominant
   expect(shallow[2]).toBeGreaterThan(deep[2]); // shallow is a lighter blue
 });
+
+test('a river node colours as flowing blue, distinct from ocean and land', () => {
+  const world = {
+    ocean: [false, false, false],
+    biome: [0],
+    biomeLegend: ['temperate-forest'],
+    water: [2, 3, 0],
+    waterLegend: ['ocean', 'salt-basin', 'river', 'dry-land'],
+    drainage: [1.0, 0, 0],
+  } as unknown as TilesScene;
+  const river = pixelColorFor([0, 0, 0], world, 0);
+  expect(river[2]).toBeGreaterThan(river[0]); // blue-dominant
+  expect(river[2]).toBeGreaterThan(river[1]);
+
+  const dryLand = pixelColorFor([0, 0, 0], world, 1);
+  expect(river).not.toEqual(dryLand);
+
+  const oceanTile = { ...world, water: [0, 3, 0] } as unknown as TilesScene;
+  const oceanColor = pixelColorFor([0, 0, 0], oceanTile, 0);
+  expect(river).not.toEqual(oceanColor);
+});
+
+test('a river brightens with higher drainage (big river vs a creek)', () => {
+  const world = {
+    ocean: [false, false],
+    water: [2, 2],
+    waterLegend: ['ocean', 'salt-basin', 'river', 'dry-land'],
+    drainage: [0.1, 10.0],
+  } as unknown as TilesScene;
+  const creek = pixelColorFor([0, 0, 0], world, 0);
+  const bigRiver = pixelColorFor([0, 0, 0], world, 1);
+  expect(bigRiver[2]).toBeGreaterThanOrEqual(creek[2]);
+  expect(bigRiver[0] + bigRiver[1] + bigRiver[2]).toBeGreaterThan(creek[0] + creek[1] + creek[2]);
+});
+
+test('a salt-basin node colours as a distinct still-lake tone', () => {
+  const world = {
+    ocean: [false, false, true],
+    water: [1, 3, 0],
+    waterLegend: ['ocean', 'salt-basin', 'river', 'dry-land'],
+    drainage: [0, 0, 0],
+    elevation_m: [10, 10, -3000],
+    sea_level_m: 0,
+  } as unknown as TilesScene;
+  const lake = pixelColorFor([0, 0, 0], world, 0);
+  const oceanColor = pixelColorFor([0, 0, 0], world, 2);
+  const river = pixelColorFor([0, 0, 0], { ...world, water: [2, 3, 0] } as unknown as TilesScene, 0);
+  expect(lake).not.toEqual(oceanColor);
+  expect(lake).not.toEqual(river);
+  // blue/green-ish: not a warm colour.
+  expect(lake[2] + lake[1]).toBeGreaterThan(lake[0] * 1.5);
+});

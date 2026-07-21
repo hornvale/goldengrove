@@ -12,6 +12,20 @@ const OCEAN_SHALLOW: readonly [number, number, number] = [58, 138, 200];
 /** How far below sea level (m) a tile must be to read as "deep". Visual-tuned. */
 const OCEAN_DEEP_THRESHOLD_M = 1200;
 
+/** River base colour (The Freshwater): a flowing blue, distinct from both
+ * ocean tones (brighter/more saturated cyan than `OCEAN_SHALLOW`) so a river
+ * reads as a live thread over land rather than a lake or coastline. */
+const RIVER_BASE: readonly [number, number, number] = [64, 168, 224];
+/** Still-water lake tone for `salt-basin` nodes (The Freshwater): a muted
+ * teal, deliberately neither the river blue nor either ocean shade. */
+const LAKE_TONE: readonly [number, number, number] = [72, 150, 138];
+/** `drainage` value at which a river reaches its brightest/widest-reading
+ * intensity — a big river brighter than a creek. Visual-tuned. */
+const RIVER_DRAINAGE_SATURATION = 5.0;
+/** How much brighter (0-1 channel fraction toward white) a river at full
+ * drainage saturation reads versus a bare trickle. Visual-tuned. */
+const RIVER_DRAINAGE_LIGHTEN = 0.35;
+
 /** Curated FLAT pixel-art land palette, keyed by `biomeLegend` name. Distinct
  * from the photoreal biome palette: saturated, reference-map colours, and —
  * critically — ice/alpine are NOT near-white (unlit, a near-white biome reads
@@ -37,9 +51,39 @@ const PIXEL_LAND_RGB: Readonly<Record<string, readonly [number, number, number]>
  * flat map rung. */
 export function pixelColorFor(
   rgb: readonly [number, number, number],
-  src: { ocean?: boolean[]; elevation_m?: number[]; sea_level_m?: number; biome?: number[]; biomeLegend?: string[] },
+  src: {
+    ocean?: boolean[];
+    elevation_m?: number[];
+    sea_level_m?: number;
+    biome?: number[];
+    biomeLegend?: string[];
+    /** Inland water class per node, indexing `waterLegend` (The Freshwater). */
+    water?: number[];
+    /** The inland-water catalog `water` indexes into. */
+    waterLegend?: string[];
+    /** Flow magnitude per node, keying river intensity (The Freshwater). */
+    drainage?: number[];
+  },
   idx: number,
 ): [number, number, number] {
+  const waterClass = src.water?.[idx];
+  if (waterClass !== undefined && src.waterLegend) {
+    const riverIndex = src.waterLegend.indexOf('river');
+    if (riverIndex >= 0 && waterClass === riverIndex) {
+      const drainage = src.drainage?.[idx] ?? 0;
+      const t = Math.min(1, Math.max(0, drainage) / RIVER_DRAINAGE_SATURATION);
+      const lighten = t * RIVER_DRAINAGE_LIGHTEN;
+      return [
+        Math.round(RIVER_BASE[0] + (255 - RIVER_BASE[0]) * lighten),
+        Math.round(RIVER_BASE[1] + (255 - RIVER_BASE[1]) * lighten),
+        Math.round(RIVER_BASE[2] + (255 - RIVER_BASE[2]) * lighten),
+      ];
+    }
+    const saltBasinIndex = src.waterLegend.indexOf('salt-basin');
+    if (saltBasinIndex >= 0 && waterClass === saltBasinIndex) {
+      return [LAKE_TONE[0], LAKE_TONE[1], LAKE_TONE[2]];
+    }
+  }
   if (src.ocean?.[idx]) {
     const deep = (src.elevation_m?.[idx] ?? 0) < (src.sea_level_m ?? 0) - OCEAN_DEEP_THRESHOLD_M;
     const c = deep ? OCEAN_DEEP : OCEAN_SHALLOW;

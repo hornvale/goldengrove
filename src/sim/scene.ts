@@ -49,6 +49,15 @@ export interface Feature {
   longitude: number;
 }
 
+/** A waterfall site (The Freshwater): a lat/lon point where a river's
+ * drainage drops sharply, from `scene/tiles/v1`'s `waterfalls`. Sparse and
+ * off-grid — the flat/region map textures don't place these (awkward on a
+ * grid-native map); a future globe overlay is the noted followup. */
+export interface Waterfall {
+  latitude: number;
+  longitude: number;
+}
+
 /** The fields of a `scene/tiles/v1` document the orrery's globe needs.
  * `elevation_m`/`sea_level_m` keep the wire's snake_case names because
  * `sampleTile` (./views/globe.ts) indexes the per-tile arrays generically by
@@ -127,6 +136,19 @@ export interface TilesScene {
    * declaration order (The Mantle), integer 0..=5. Row-major, matching
    * `elevation_m`. */
   cloudType: number[];
+  /** Inland water class per tile, as an index into `waterLegend` (The
+   * Freshwater) — row-major, matching `elevation_m`. */
+  water: number[];
+  /** The inland-water catalog, in stable order (The Freshwater);
+   * `water`'s indices key into this by position — e.g.
+   * `["ocean","salt-basin","river","dry-land"]`. */
+  waterLegend: string[];
+  /** Flow magnitude per tile (The Freshwater), zero on ocean — row-major,
+   * matching `elevation_m`. */
+  drainage: number[];
+  /** Waterfall sites: sparse lat/lon points, not grid-aligned (The
+   * Freshwater). */
+  waterfalls: Waterfall[];
 }
 
 /** The fields of a `scene/tiles-region/v1` document — a regional tile
@@ -166,6 +188,18 @@ export interface RegionScene {
   t_swing_c: number[];
   /** Moisture per node, a dimensionless ratio — length `(samples+1)^2`. */
   moisture: number[];
+  /** Inland water class per node, as an index into `waterLegend` (The
+   * Freshwater) — length `(samples+1)^2`. */
+  water: number[];
+  /** The inland-water catalog, in stable order (The Freshwater); `water`'s
+   * indices key into this by position. */
+  waterLegend: string[];
+  /** Flow magnitude per node (The Freshwater), zero on ocean — length
+   * `(samples+1)^2`. */
+  drainage: number[];
+  /** Waterfall sites: sparse lat/lon points, not grid-aligned (The
+   * Freshwater). */
+  waterfalls: Waterfall[];
 }
 
 /** One moon's surface: derived physics + seeded descriptors, from
@@ -536,6 +570,15 @@ function parseFeature(doc: unknown): Feature {
   };
 }
 
+function parseWaterfall(doc: unknown): Waterfall {
+  const waterfall = doc as Record<string, unknown>;
+  if (typeof waterfall !== "object" || waterfall === null) fail("a waterfall must be an object");
+  return {
+    latitude: requireNumber(waterfall, "latitude"),
+    longitude: requireNumber(waterfall, "longitude"),
+  };
+}
+
 /** Parse and validate a scene/tiles/v1 document; throw SceneFormatError naming any violation. */
 export function parseTiles(text: string): TilesScene {
   const doc = parseDocument(text);
@@ -554,6 +597,9 @@ export function parseTiles(text: string): TilesScene {
   const tiles = width * height;
   const features = doc.features;
   if (!Array.isArray(features)) fail("features must be an array");
+  const waterfalls = doc.waterfalls;
+  if (!Array.isArray(waterfalls)) fail("waterfalls must be an array");
+  const waterLegend = stringArray(doc, "water_legend");
   const seasonPeriodDays = requireNumber(doc, "season_period_days");
   if (seasonPeriodDays <= 0) fail("season_period_days must be positive");
   const circulationBandsRaw = doc.circulation_bands;
@@ -596,6 +642,10 @@ export function parseTiles(text: string): TilesScene {
     cloudFraction: numberArray(doc, "cloud_fraction", tiles),
     weatherPropensity: numberArray(doc, "weather_propensity", tiles),
     cloudType: intArrayInRange(doc, "cloud_type", tiles, 0, 5),
+    water: intArrayInRange(doc, "water", tiles, 0, Math.max(0, waterLegend.length - 1)),
+    waterLegend,
+    drainage: numberArray(doc, "drainage", tiles),
+    waterfalls: waterfalls.map(parseWaterfall),
   };
 }
 
@@ -631,6 +681,9 @@ export function parseRegion(text: string): RegionScene {
     circulationBands = circulationBandsRaw;
   }
   const nodes = (samples + 1) * (samples + 1);
+  const waterLegend = stringArray(doc, "water_legend");
+  const waterfalls = doc.waterfalls;
+  if (!Array.isArray(waterfalls)) fail("waterfalls must be an array");
   return {
     schema: REGION_SCHEMA,
     seed,
@@ -651,6 +704,10 @@ export function parseRegion(text: string): RegionScene {
     t_mean_c: numberArray(doc, "t_mean_c", nodes),
     t_swing_c: numberArray(doc, "t_swing_c", nodes),
     moisture: numberArray(doc, "moisture", nodes),
+    water: intArrayInRange(doc, "water", nodes, 0, Math.max(0, waterLegend.length - 1)),
+    waterLegend,
+    drainage: numberArray(doc, "drainage", nodes),
+    waterfalls: waterfalls.map(parseWaterfall),
   };
 }
 

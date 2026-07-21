@@ -121,6 +121,10 @@ function validTiles(): Record<string, unknown> {
     cloud_fraction: Array(tiles).fill(0.4),
     weather_propensity: Array(tiles).fill(0.6),
     cloud_type: Array.from({ length: tiles }, (_, i) => i % 6),
+    water: Array(tiles).fill(3),
+    water_legend: ['ocean', 'salt-basin', 'river', 'dry-land'],
+    drainage: Array(tiles).fill(0.0),
+    waterfalls: [{ latitude: 5.0, longitude: 10.0 }],
   };
 }
 
@@ -419,6 +423,10 @@ function validRegion(): Record<string, unknown> {
     t_mean_c: [15.0, 14.0, 13.0, 12.0],
     t_swing_c: [5.0, 5.0, 5.0, 5.0],
     moisture: [0.5, 0.5, 0.5, 0.5],
+    water: [3, 3, 0, 3],
+    water_legend: ['ocean', 'salt-basin', 'river', 'dry-land'],
+    drainage: [0.0, 0.0, 0.0, 0.0],
+    waterfalls: [],
   };
 }
 

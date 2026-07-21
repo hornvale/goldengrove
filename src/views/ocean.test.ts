@@ -30,6 +30,8 @@ export function oceanTiles(): TilesScene {
     precipMmYr: Array(8).fill(800), snowFraction: Array(8).fill(0.1),
     precipRegime: Array(8).fill(0), cloudFraction: Array(8).fill(0.4),
     weatherPropensity: Array(8).fill(0.6), cloudType: Array(8).fill(0),
+    water: Array(8).fill(3), waterLegend: ['ocean', 'salt-basin', 'river', 'dry-land'],
+    drainage: Array(8).fill(0), waterfalls: [],
   };
 }
 
