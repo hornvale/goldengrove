@@ -6,6 +6,7 @@ import {
   buildFaceGeometry,
   buildRegionTileGeometry,
   buildTileGeometry,
+  buildVoxelHeightfieldGeometry,
   buildVoxelRegionTileGeometry,
   buildVoxelRegionTileGeometryIndexed,
   buildVoxelTileGeometry,
@@ -801,6 +802,151 @@ describe('the natural lens (behavior-preservation regression)', () => {
           ? elevationColor(tiles.elevation_m[i]!, tiles.sea_level_m)
           : biomeColorForName(tiles.biomeLegend[tiles.biome[i]!] ?? ''));
       expect(naturalLens.colorAt(tiles, i, 0)).toEqual(expected);
+    }
+  });
+});
+
+/** A hand-built heightfield fixture: a `samples × samples` cell grid (nodes
+ * `(samples+1)²`, all `elevM`) except the LAST cell's own representative node
+ * — `(samples-1, samples-1)` in `buildVoxelHeightfieldGeometry`'s own
+ * top-left-corner convention (see its doc comment) — which is `highElevM`.
+ * That cell sits at the grid's own last row/col, so two of its four edges
+ * are the grid boundary (no in-grid neighbor, no wall — the within-region
+ * counterpart of `buildVoxelBlocks`'s "no wall at a tile boundary" rule) and
+ * the other two border low cells — exactly 2 interior wall quads, the same
+ * "one high cell, three low" shape `stepTiles`/`stepRegion` give the sphere
+ * voxel builders' own tests. */
+function stepHeightfieldRegion(samples: number, elevM: number, highElevM: number): RegionScene {
+  const n = samples + 1;
+  const elevation_m = new Array(n * n).fill(elevM) as number[];
+  elevation_m[(samples - 1) * n + (samples - 1)] = highElevM;
+  return { samples, elevation_m } as unknown as RegionScene;
+}
+
+/** A flat (uniform-elevation) heightfield fixture — every node the same, so
+ * every cell bands to the same height and no wall is ever emitted. */
+function flatHeightfieldRegion(samples: number, elevM: number): RegionScene {
+  const n = samples + 1;
+  const elevation_m = new Array(n * n).fill(elevM) as number[];
+  return { samples, elevation_m } as unknown as RegionScene;
+}
+
+describe('buildVoxelHeightfieldGeometry', () => {
+  /** Non-indexed flat-shaded geometry: one triangle per 3 position entries —
+   * the same helper the sphere voxel builders' tests use. */
+  function triangleCount(geom: THREE.BufferGeometry): number {
+    return geom.getAttribute('position').count / 3;
+  }
+
+  /** True if any two of a triangle's 3 vertices sit at the exact same 3D
+   * position — a wall between two EQUAL-height cells would be built from a
+   * top corner and a bottom corner at the identical height along the
+   * identical (x, z), i.e. the identical point, so its two triangles would
+   * be degenerate. A correct implementation never emits a wall for an
+   * equal-height neighbor, so a degenerate triangle here means the emission
+   * rule regressed to `<=` (mirrors the sphere voxel builders' identical
+   * helper). */
+  function hasWallBetweenEqualCells(geom: THREE.BufferGeometry): boolean {
+    const pos = geom.getAttribute('position');
+    const same = (i: number, j: number): boolean =>
+      Math.abs(pos.getX(i) - pos.getX(j)) < 1e-9 &&
+      Math.abs(pos.getY(i) - pos.getY(j)) < 1e-9 &&
+      Math.abs(pos.getZ(i) - pos.getZ(j)) < 1e-9;
+    for (let t = 0; t < pos.count; t += 3) {
+      if (same(t, t + 1) || same(t + 1, t + 2) || same(t, t + 2)) return true;
+    }
+    return false;
+  }
+
+  /** Max absolute value of a position attribute's given component, over
+   * every vertex — used to confirm the grid stays within `±extent/2`. */
+  function maxAbsComponent(
+    pos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+    axis: 'x' | 'y' | 'z',
+  ): number {
+    let max = 0;
+    for (let i = 0; i < pos.count; i++) {
+      const v = axis === 'x' ? pos.getX(i) : axis === 'y' ? pos.getY(i) : pos.getZ(i);
+      max = Math.max(max, Math.abs(v));
+    }
+    return max;
+  }
+
+  it('emits a top face per cell and a wall ONLY where a cell is higher than a neighbor', () => {
+    const region = stepHeightfieldRegion(2, 0, 5000);
+    const geom = buildVoxelHeightfieldGeometry(region, () => [1, 1, 1], { extent: 2, heightScale: 1, bandM: 100 });
+    // samples=2 → 2×2 = 4 cells × 2 top tris = 8 top tris; the one high cell
+    // sits at the grid's own last row/col (2 of its edges are the grid
+    // boundary — no wall there) and borders 2 low cells — 2 interior wall
+    // quads (4 tris) — same shape as the sphere builders' step fixture.
+    expect(triangleCount(geom)).toBe(8 /* tops */ + 2 * 2 /* two wall quads */);
+    // No wall between two equal-height (both-low) cells.
+    expect(hasWallBetweenEqualCells(geom)).toBe(false);
+  });
+
+  it('lays the grid on the X–Z plane within ±extent/2, height along +Y', () => {
+    const region = flatHeightfieldRegion(4, 1000);
+    const geom = buildVoxelHeightfieldGeometry(region, () => [1, 1, 1], { extent: 4, heightScale: 1, bandM: 100 });
+    const pos = geom.getAttribute('position');
+    expect(maxAbsComponent(pos, 'x')).toBeLessThanOrEqual(2 + 1e-6);
+    expect(maxAbsComponent(pos, 'z')).toBeLessThanOrEqual(2 + 1e-6);
+    // A flat (equal-elevation, so equal-banded-height) region emits no walls
+    // at all — every top vertex sits at the SAME banded Y.
+    const ys = new Set<number>();
+    for (let i = 0; i < pos.count; i++) ys.add(Number(pos.getY(i).toFixed(6)));
+    expect(ys.size).toBe(1);
+  });
+
+  it("colors each cell flat via colorAt(node) — a region node index IS its color index", () => {
+    const region = stepHeightfieldRegion(2, 0, 5000);
+    const palette: Record<number, [number, number, number]> = {};
+    const colorAt = (i: number): [number, number, number] => {
+      palette[i] ??= [(i * 37) % 250, (i * 59) % 250, (i * 83) % 250];
+      return palette[i]!;
+    };
+    const geom = buildVoxelHeightfieldGeometry(region, colorAt, { extent: 2, heightScale: 1, bandM: 100 });
+    const col = geom.getAttribute('color');
+    // Pass 1 emits every cell's 6 top vertices contiguously, in row-major
+    // (row*samples+col) order, before any wall — cell `c`'s top face is
+    // exactly vertices [c*6, c*6+6), each sharing one flat color.
+    for (let c = 0; c < 4; c++) {
+      const base = c * 6;
+      const r0 = col.getX(base), g0 = col.getY(base), b0 = col.getZ(base);
+      for (let v = base + 1; v < base + 6; v++) {
+        expect(col.getX(v)).toBeCloseTo(r0, 6);
+        expect(col.getY(v)).toBeCloseTo(g0, 6);
+        expect(col.getZ(v)).toBeCloseTo(b0, 6);
+      }
+    }
+  });
+
+  it("a wall is darkened relative to its cell's top color by VOXEL_CLIFF_DARKEN", () => {
+    const region = stepHeightfieldRegion(2, 0, 5000);
+    const geom = buildVoxelHeightfieldGeometry(region, () => [200, 100, 40], { extent: 2, heightScale: 1, bandM: 100 });
+    const pos = geom.getAttribute('position');
+    const col = geom.getAttribute('color');
+    const topVerts = 4 * 6;
+    expect(pos.count).toBeGreaterThan(topVerts);
+    for (let v = topVerts; v < pos.count; v++) {
+      expect(col.getX(v) * 255).toBeCloseTo(200 * VOXEL_CLIFF_DARKEN, 3);
+      expect(col.getY(v) * 255).toBeCloseTo(100 * VOXEL_CLIFF_DARKEN, 3);
+      expect(col.getZ(v) * 255).toBeCloseTo(40 * VOXEL_CLIFF_DARKEN, 3);
+    }
+  });
+
+  it('top-face normals point straight up (+Y); wall normals are horizontal', () => {
+    const region = stepHeightfieldRegion(2, 0, 5000);
+    const geom = buildVoxelHeightfieldGeometry(region, () => [200, 100, 40], { extent: 2, heightScale: 1, bandM: 100 });
+    const nrm = geom.getAttribute('normal');
+    const topVerts = 4 * 6;
+    for (let v = 0; v < topVerts; v++) {
+      expect(nrm.getX(v)).toBeCloseTo(0, 5);
+      expect(nrm.getY(v)).toBeCloseTo(1, 5);
+      expect(nrm.getZ(v)).toBeCloseTo(0, 5);
+    }
+    expect(nrm.count).toBeGreaterThan(topVerts); // at least one wall exists to check
+    for (let v = topVerts; v < nrm.count; v++) {
+      expect(Math.abs(nrm.getY(v))).toBeLessThan(1e-5); // a vertical wall's normal is purely horizontal
     }
   });
 });

@@ -215,6 +215,132 @@ export interface VoxelBuildResult extends VoxelVertexIndex {
   geom: THREE.BufferGeometry;
 }
 
+/** Allocate the flat typed arrays a voxel builder writes vertices into, plus
+ * the `push` closure that appends one — the typed-array bookkeeping
+ * (worst-case sizing, the `vi` cursor, per-vertex position/normal/color/
+ * index/darken writes, and the final `subarray` trim into a `VoxelBuildResult`)
+ * is identical whether the builder is `buildVoxelBlocks` (sphere) or
+ * `buildVoxelHeightfieldGeometry` (flat plane, campaign "The Diorama") — only
+ * WHAT position/normal each computes differs, which stays local to each
+ * builder. `maxVerts` is the caller's own worst-case vertex count (e.g.
+ * `N * N * (6 top + 4 edges * 6 wall)`). */
+function makeVertexWriter(maxVerts: number): {
+  push: (
+    p: readonly [number, number, number],
+    n: readonly [number, number, number],
+    rgb: RGB,
+    dataIdx: number,
+    darken: number,
+  ) => void;
+  finish: () => VoxelBuildResult;
+} {
+  const pos = new Float32Array(maxVerts * 3);
+  const nrm = new Float32Array(maxVerts * 3);
+  const colArr = new Float32Array(maxVerts * 3);
+  const vertIndex = new Int32Array(maxVerts);
+  const vertDarken = new Float32Array(maxVerts);
+  let vi = 0;
+  const push = (
+    p: readonly [number, number, number],
+    n: readonly [number, number, number],
+    rgb: RGB,
+    dataIdx: number,
+    darken: number,
+  ): void => {
+    const o = vi * 3;
+    pos[o] = p[0];
+    pos[o + 1] = p[1];
+    pos[o + 2] = p[2];
+    nrm[o] = n[0];
+    nrm[o + 1] = n[1];
+    nrm[o + 2] = n[2];
+    colArr[o] = rgb[0] / 255;
+    colArr[o + 1] = rgb[1] / 255;
+    colArr[o + 2] = rgb[2] / 255;
+    vertIndex[vi] = dataIdx;
+    vertDarken[vi] = darken;
+    vi++;
+  };
+  const finish = (): VoxelBuildResult => {
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, vi * 3), 3));
+    geom.setAttribute('normal', new THREE.BufferAttribute(nrm.subarray(0, vi * 3), 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(colArr.subarray(0, vi * 3), 3));
+    return { geom, index: vertIndex.subarray(0, vi), darken: vertDarken.subarray(0, vi) };
+  };
+  return { push, finish };
+}
+
+/** Push a flat-shaded quad (2 triangles, 6 vertices) built from 4 REAL 3D
+ * corner positions — `v00`/`v10` share an edge with `v00`/`v01` (the quad's
+ * two edges from `v00`), and `v11` is the corner diagonal from `v00`.
+ * Computes the flat normal from the quad's own geometry
+ * (`(v10-v00) × (v01-v00)` — actual position algebra, no assumption of a
+ * sphere OR a plane baked in) and flips the triangle winding — hence which
+ * side renders front-facing — if that normal disagrees with `outwardRef` (a
+ * rough "should point roughly this way" reference; only its SIGN against the
+ * computed normal matters, not its length or precision). This is the one
+ * piece of the two-pass voxel build that's pure vertex-position math with no
+ * sphere- or plane-specific assumption baked in, so `buildVoxelBlocks`'s wall
+ * emission (sphere geometry — `outwardRef` derived from unit-vector
+ * arithmetic around the sphere's center) and `buildVoxelHeightfieldGeometry`'s
+ * top-face and wall emission (planar geometry — `outwardRef` a constant or a
+ * simple center-to-edge direction) share it rather than each re-deriving the
+ * same cross-product-and-flip trick. */
+function pushFlatQuad(
+  pushVertex: (
+    p: readonly [number, number, number],
+    n: readonly [number, number, number],
+    rgb: RGB,
+    dataIdx: number,
+    darken: number,
+  ) => void,
+  v00: readonly [number, number, number],
+  v10: readonly [number, number, number],
+  v01: readonly [number, number, number],
+  v11: readonly [number, number, number],
+  outwardRef: readonly [number, number, number],
+  rgb: RGB,
+  dataIdx: number,
+  darken: number,
+): void {
+  const e1x = v10[0] - v00[0], e1y = v10[1] - v00[1], e1z = v10[2] - v00[2];
+  const e2x = v01[0] - v00[0], e2y = v01[1] - v00[1], e2z = v01[2] - v00[2];
+  let nx = e1y * e2z - e1z * e2y;
+  let ny = e1z * e2x - e1x * e2z;
+  let nz = e1x * e2y - e1y * e2x;
+  const len = Math.hypot(nx, ny, nz) || 1;
+  nx /= len;
+  ny /= len;
+  nz /= len;
+  const flip = nx * outwardRef[0] + ny * outwardRef[1] + nz * outwardRef[2] < 0;
+  if (flip) {
+    nx = -nx;
+    ny = -ny;
+    nz = -nz;
+  }
+  const normal: [number, number, number] = [nx, ny, nz];
+  const pushTri = (
+    a: readonly [number, number, number],
+    b: readonly [number, number, number],
+    c: readonly [number, number, number],
+  ): void => {
+    // Swapping the last two vertices flips the triangle's winding (and so
+    // its front-facing side) without recomputing the normal.
+    if (!flip) {
+      pushVertex(a, normal, rgb, dataIdx, darken);
+      pushVertex(b, normal, rgb, dataIdx, darken);
+      pushVertex(c, normal, rgb, dataIdx, darken);
+    } else {
+      pushVertex(a, normal, rgb, dataIdx, darken);
+      pushVertex(c, normal, rgb, dataIdx, darken);
+      pushVertex(b, normal, rgb, dataIdx, darken);
+    }
+  };
+  pushTri(v00, v10, v01);
+  pushTri(v10, v11, v01);
+}
+
 /** Build one cube-face tile's geometry (base OR region — see below) as a
  * `cellsPerEdge × cellsPerEdge` grid of extruded, flat-topped blocks — the
  * Voxel style's shared keystone build. Each cell samples its own BANDED
@@ -340,35 +466,8 @@ function buildVoxelBlocks(
   const neighborRadius = (ownIdx: number, row: number, col: number): number =>
     row < 0 || row >= N || col < 0 || col >= N ? cellRadius[ownIdx]! : cellRadius[row * N + col]!;
 
-  const maxVerts = N * N * (6 + 4 * 6);
-  const pos = new Float32Array(maxVerts * 3);
-  const nrm = new Float32Array(maxVerts * 3);
-  const colArr = new Float32Array(maxVerts * 3);
-  const vertIndex = new Int32Array(maxVerts);
-  const vertDarken = new Float32Array(maxVerts);
-  let vi = 0;
-
-  const pushVertex = (
-    p: readonly [number, number, number],
-    n: readonly [number, number, number],
-    rgb: RGB,
-    dataIdx: number,
-    darken: number,
-  ): void => {
-    const o = vi * 3;
-    pos[o] = p[0];
-    pos[o + 1] = p[1];
-    pos[o + 2] = p[2];
-    nrm[o] = n[0];
-    nrm[o + 1] = n[1];
-    nrm[o + 2] = n[2];
-    colArr[o] = rgb[0] / 255;
-    colArr[o + 1] = rgb[1] / 255;
-    colArr[o + 2] = rgb[2] / 255;
-    vertIndex[vi] = dataIdx;
-    vertDarken[vi] = darken;
-    vi++;
-  };
+  const writer = makeVertexWriter(N * N * (6 + 4 * 6));
+  const pushVertex = writer.push;
 
   // Pass 1: every cell's top face, row-major — keeps a cell's 6 top
   // vertices at a fixed, predictable offset (`(row*N+col)*6`).
@@ -431,46 +530,18 @@ function buildVoxelBlocks(
     const topB: [number, number, number] = [cB[0] * rTop, cB[1] * rTop, cB[2] * rTop];
     const botA: [number, number, number] = [cA[0] * rBot, cA[1] * rBot, cA[2] * rBot];
     const botB: [number, number, number] = [cB[0] * rBot, cB[1] * rBot, cB[2] * rBot];
-    const e1x = topB[0] - topA[0], e1y = topB[1] - topA[1], e1z = topB[2] - topA[2];
-    const e2x = botA[0] - topA[0], e2y = botA[1] - topA[1], e2z = botA[2] - topA[2];
-    let nx = e1y * e2z - e1z * e2y;
-    let ny = e1z * e2x - e1x * e2z;
-    let nz = e1x * e2y - e1y * e2x;
-    const len = Math.hypot(nx, ny, nz) || 1;
-    nx /= len;
-    ny /= len;
-    nz /= len;
+    // Outward reference: the edge midpoint projected back onto the unit
+    // sphere (renormalizing `cA+cB`, since `cA`/`cB` are unit vectors), minus
+    // the cell's own center direction — an approximate outward TANGENT at
+    // this cell, used only for `pushFlatQuad`'s flip-sign test below.
     const midLen = Math.hypot(cA[0] + cB[0], cA[1] + cB[1], cA[2] + cB[2]) || 1;
-    const outX = (cA[0] + cB[0]) / midLen - center[0];
-    const outY = (cA[1] + cB[1]) / midLen - center[1];
-    const outZ = (cA[2] + cB[2]) / midLen - center[2];
-    const flip = nx * outX + ny * outY + nz * outZ < 0;
-    if (flip) {
-      nx = -nx;
-      ny = -ny;
-      nz = -nz;
-    }
-    const wallNormal: [number, number, number] = [nx, ny, nz];
+    const outward: [number, number, number] = [
+      (cA[0] + cB[0]) / midLen - center[0],
+      (cA[1] + cB[1]) / midLen - center[1],
+      (cA[2] + cB[2]) / midLen - center[2],
+    ];
     const wallColor: RGB = [rgb[0] * VOXEL_CLIFF_DARKEN, rgb[1] * VOXEL_CLIFF_DARKEN, rgb[2] * VOXEL_CLIFF_DARKEN];
-    const pushTri = (
-      v0: readonly [number, number, number],
-      v1: readonly [number, number, number],
-      v2: readonly [number, number, number],
-    ): void => {
-      // Swapping the last two vertices flips the triangle's winding (and so
-      // its front-facing side) without recomputing the normal.
-      if (!flip) {
-        pushVertex(v0, wallNormal, wallColor, dataIdx, VOXEL_CLIFF_DARKEN);
-        pushVertex(v1, wallNormal, wallColor, dataIdx, VOXEL_CLIFF_DARKEN);
-        pushVertex(v2, wallNormal, wallColor, dataIdx, VOXEL_CLIFF_DARKEN);
-      } else {
-        pushVertex(v0, wallNormal, wallColor, dataIdx, VOXEL_CLIFF_DARKEN);
-        pushVertex(v2, wallNormal, wallColor, dataIdx, VOXEL_CLIFF_DARKEN);
-        pushVertex(v1, wallNormal, wallColor, dataIdx, VOXEL_CLIFF_DARKEN);
-      }
-    };
-    pushTri(topA, topB, botA);
-    pushTri(topB, botB, botA);
+    pushFlatQuad(pushVertex, topA, topB, botA, botB, outward, wallColor, dataIdx, VOXEL_CLIFF_DARKEN);
   };
 
   // Pass 2: every cell's walls (0-4 quads each, only where a lower
@@ -497,11 +568,7 @@ function buildVoxelBlocks(
     }
   }
 
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, vi * 3), 3));
-  geom.setAttribute('normal', new THREE.BufferAttribute(nrm.subarray(0, vi * 3), 3));
-  geom.setAttribute('color', new THREE.BufferAttribute(colArr.subarray(0, vi * 3), 3));
-  return { geom, index: vertIndex.subarray(0, vi), darken: vertDarken.subarray(0, vi) };
+  return writer.finish();
 }
 
 /** Build one cube-sphere tile's geometry (from `scene/tiles/v1`) as extruded,
@@ -594,6 +661,161 @@ export function buildVoxelRegionTileGeometryIndexed(
     (lat, lon) => nearestRegionNodeIndex(region, lat, lon),
     colorAt,
   );
+}
+
+/** Build a `scene/tiles-region/v1` patch's geometry as a FLAT (not
+ * spherical) extruded-block diorama — the Voxel-2.5D MAP style's geometry
+ * (campaign "The Diorama", Task 1; the sphere builders above are the GLOBE
+ * style's). Unlike `buildVoxelTileGeometry`/`buildVoxelRegionTileGeometry`,
+ * there is no independent `cellsPerEdge`: the region's own `(samples+1)²`
+ * node grid IS the corner lattice (`N = region.samples`), laid on the local
+ * X–Z plane spanning `[-extent/2, extent/2]²` — corner `(row, col)` sits at
+ * `x = col/samples*extent - extent/2`, `z = row/samples*extent - extent/2`,
+ * matching `regionPatchUnits`' own row-major node order (row = iy/b outer,
+ * col = ix/a inner), so corner `(row, col)` IS node `row*(samples+1)+col`
+ * exactly — no resampling needed. Each of the `samples²` cells takes its
+ * OWN top-left corner node as its representative: the elevation `colorAt` is
+ * called with (a region node index IS its color index, per
+ * `buildVoxelRegionTileGeometry`'s convention).
+ *
+ * A cell's top `y = heightScale * quantizeBands(elevationM, bandM) /
+ * REFERENCE_RADIUS_M` — the same displacement-FRACTION formula
+ * `buildTileGeometry`/`buildVoxelBlocks` use for a sphere's radius (just
+ * added to a flat 0 instead of multiplying a nonzero radius, since there's
+ * no "undisplaced" flat height to scale), so the same `heightScale`/`bandM`
+ * numbers read comparably between the globe and map views. Walls follow
+ * `buildVoxelBlocks`'s identical rule: a vertical quad wherever an
+ * edge-neighbor's banded height is STRICTLY lower; a cell at the grid's own
+ * edge has no in-grid neighbor there (no wall, no seam — a region patch has
+ * no sibling on this flat diorama to seam against).
+ *
+ * Shares the actual vertex-emission math with `buildVoxelBlocks` via
+ * `pushFlatQuad` (the cross-product-normal + winding-flip + 2-triangle push)
+ * and `makeVertexWriter` (the typed-array bookkeeping) — what's genuinely
+ * different between a sphere and a flat plane (corner→position, per-cell
+ * height, and the "outward" reference `pushFlatQuad`'s flip test needs) stays
+ * local to each builder: a planar top face's true normal is simply `(0, 1,
+ * 0)` (no per-cell approximation needed, unlike the sphere's corner-average),
+ * and a planar wall's outward reference is the plain (unnormalized) direction
+ * from the cell's own center toward the shared edge's midpoint — no
+ * unit-sphere renormalization, since these aren't directions from an origin. */
+export function buildVoxelHeightfieldGeometry(
+  region: RegionScene,
+  colorAt: (nodeIndex: number) => RGB,
+  opts: { extent: number; heightScale: number; bandM: number },
+): THREE.BufferGeometry {
+  const { extent, heightScale, bandM } = opts;
+  const N = region.samples;
+  const cn = N + 1;
+
+  // Corner (row, col) → (x, z), row-major exactly like `region.elevation_m`'s
+  // own node order — corner (row, col) IS node (row, col).
+  const cornerX = new Float64Array(cn * cn);
+  const cornerZ = new Float64Array(cn * cn);
+  for (let row = 0; row <= N; row++) {
+    const z = (row / N) * extent - extent / 2;
+    for (let col = 0; col <= N; col++) {
+      const k = row * cn + col;
+      cornerX[k] = (col / N) * extent - extent / 2;
+      cornerZ[k] = z;
+    }
+  }
+  const cornerXZ = (row: number, col: number): [number, number] => {
+    const k = row * cn + col;
+    return [cornerX[k]!, cornerZ[k]!];
+  };
+
+  // Per-cell banded height, node index, color, and center (x, z), computed
+  // once (N×N) — the wall pass below reads a neighbor's height without
+  // resampling. A cell's own node is its top-left corner, `row*cn+col`.
+  const cellHeight = new Float64Array(N * N);
+  const cellCenterX = new Float64Array(N * N);
+  const cellCenterZ = new Float64Array(N * N);
+  const cellDataIdx = new Int32Array(N * N);
+  const cellColor: RGB[] = new Array(N * N);
+  for (let row = 0; row < N; row++) {
+    for (let col = 0; col < N; col++) {
+      const idx = row * N + col;
+      const nodeIdx = row * cn + col;
+      const elev = region.elevation_m[nodeIdx]!;
+      const banded = quantizeBands(elev, bandM);
+      cellHeight[idx] = (heightScale * banded) / REFERENCE_RADIUS_M;
+      cellCenterX[idx] = ((col + 0.5) / N) * extent - extent / 2;
+      cellCenterZ[idx] = ((row + 0.5) / N) * extent - extent / 2;
+      cellDataIdx[idx] = nodeIdx;
+      cellColor[idx] = colorAt(nodeIdx);
+    }
+  }
+  // A cell just outside [0, N) (the grid's own edge) has no in-grid
+  // neighbor — fall back to `ownIdx`'s own height, exactly like
+  // `buildVoxelBlocks`'s `neighborRadius` (a deliberate, bounded "no wall at
+  // the grid boundary" rule, not a bug).
+  const neighborHeight = (ownIdx: number, row: number, col: number): number =>
+    row < 0 || row >= N || col < 0 || col >= N ? cellHeight[ownIdx]! : cellHeight[row * N + col]!;
+
+  const writer = makeVertexWriter(N * N * (6 + 4 * 6));
+
+  // Pass 1: every cell's top face, row-major (cell `row*N+col`'s 6 vertices
+  // at `(row*N+col)*6` — the same fixed layout `buildVoxelBlocks` uses).
+  for (let row = 0; row < N; row++) {
+    for (let col = 0; col < N; col++) {
+      const idx = row * N + col;
+      const h = cellHeight[idx]!;
+      const rgb = cellColor[idx]!;
+      const dataIdx = cellDataIdx[idx]!;
+      const [x00, z00] = cornerXZ(row, col);
+      const [x10, z10] = cornerXZ(row, col + 1);
+      const [x01, z01] = cornerXZ(row + 1, col);
+      const [x11, z11] = cornerXZ(row + 1, col + 1);
+      const p00: [number, number, number] = [x00, h, z00];
+      const p10: [number, number, number] = [x10, h, z10];
+      const p01: [number, number, number] = [x01, h, z01];
+      const p11: [number, number, number] = [x11, h, z11];
+      // A horizontal top face's true normal IS (0,1,0); `pushFlatQuad` still
+      // runs its cross-product+flip so the winding comes out front-facing
+      // from above regardless of this file's row/col→x/z axis convention,
+      // rather than hand-deriving it.
+      pushFlatQuad(writer.push, p00, p10, p01, p11, [0, 1, 0], rgb, dataIdx, 1);
+    }
+  }
+
+  // Pass 2: every cell's walls (0-4 quads each, only where a lower neighbor
+  // exists) — same 4-edge structure as `buildVoxelBlocks`'s pass 2.
+  for (let row = 0; row < N; row++) {
+    for (let col = 0; col < N; col++) {
+      const idx = row * N + col;
+      const hOwn = cellHeight[idx]!;
+      const rgb = cellColor[idx]!;
+      const dataIdx = cellDataIdx[idx]!;
+      const centerX = cellCenterX[idx]!;
+      const centerZ = cellCenterZ[idx]!;
+      const [x00, z00] = cornerXZ(row, col);
+      const [x10, z10] = cornerXZ(row, col + 1);
+      const [x01, z01] = cornerXZ(row + 1, col);
+      const [x11, z11] = cornerXZ(row + 1, col + 1);
+      const wallColor: RGB = [rgb[0] * VOXEL_CLIFF_DARKEN, rgb[1] * VOXEL_CLIFF_DARKEN, rgb[2] * VOXEL_CLIFF_DARKEN];
+      const emit = (ax: number, az: number, bx: number, bz: number, hNeighbor: number): void => {
+        if (hNeighbor >= hOwn) return; // strict `<`: no wall between equal-height cells
+        const topA: [number, number, number] = [ax, hOwn, az];
+        const topB: [number, number, number] = [bx, hOwn, bz];
+        const botA: [number, number, number] = [ax, hNeighbor, az];
+        const botB: [number, number, number] = [bx, hNeighbor, bz];
+        // Outward reference: the (unnormalized) direction from this cell's
+        // center toward the shared edge's midpoint — only its SIGN matters
+        // (dotted against the quad's own cross-product normal in
+        // `pushFlatQuad`), so no unit-sphere-style renormalization is needed
+        // on a flat plane.
+        const outward: [number, number, number] = [(ax + bx) / 2 - centerX, 0, (az + bz) / 2 - centerZ];
+        pushFlatQuad(writer.push, topA, topB, botA, botB, outward, wallColor, dataIdx, VOXEL_CLIFF_DARKEN);
+      };
+      emit(x00, z00, x10, z10, neighborHeight(idx, row - 1, col)); // "up" (row-1) edge
+      emit(x01, z01, x11, z11, neighborHeight(idx, row + 1, col)); // "down" (row+1) edge
+      emit(x00, z00, x01, z01, neighborHeight(idx, row, col - 1)); // "left" (col-1) edge
+      emit(x10, z10, x11, z11, neighborHeight(idx, row, col + 1)); // "right" (col+1) edge
+    }
+  }
+
+  return writer.finish().geom;
 }
 
 /** Fixed lat/lon step (degrees) for the analytic-normal gradient probe —
