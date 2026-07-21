@@ -15,7 +15,7 @@ const OCEAN_DEEP_THRESHOLD_M = 1200;
 /** River base colour (The Freshwater): a flowing blue, distinct from both
  * ocean tones (brighter/more saturated cyan than `OCEAN_SHALLOW`) so a river
  * reads as a live thread over land rather than a lake or coastline. */
-const RIVER_BASE: readonly [number, number, number] = [64, 168, 224];
+const RIVER_BASE: readonly [number, number, number] = [46, 134, 222];
 /** Still-water lake tone for `salt-basin` nodes (The Freshwater): a muted
  * teal, deliberately neither the river blue nor either ocean shade. */
 const LAKE_TONE: readonly [number, number, number] = [72, 150, 138];
@@ -24,7 +24,7 @@ const LAKE_TONE: readonly [number, number, number] = [72, 150, 138];
 const RIVER_DRAINAGE_SATURATION = 5.0;
 /** How much brighter (0-1 channel fraction toward white) a river at full
  * drainage saturation reads versus a bare trickle. Visual-tuned. */
-const RIVER_DRAINAGE_LIGHTEN = 0.35;
+const RIVER_DRAINAGE_LIGHTEN = 0.12;
 
 /** Curated FLAT pixel-art land palette, keyed by `biomeLegend` name. Distinct
  * from the photoreal biome palette: saturated, reference-map colours, and —
