@@ -245,6 +245,13 @@ function placeMarker(m: Marker, reliefScale: number): void {
   m.label.position.copy(m.up).multiplyScalar(dotRadius + m.label.scale.y / 2 + GLOBE_RADIUS * 0.02);
 }
 
+/** The globe's render style — geometry + shading, orthogonal to the data
+ * `Lens` (which only recolors). `smooth` is today's cube-sphere mesh;
+ * `voxel` and `terraced` land in later tasks (Task 1 treats them as
+ * smooth-geometry-for-now, never throwing); `faceted` flat-shades the
+ * existing mesh, the cheapest style — just a material flag. */
+export type GlobeStyle = 'smooth' | 'voxel' | 'terraced' | 'faceted';
+
 /** The globe view's public surface: a mountable object graph plus the
  * per-frame driver a caller (main.ts's rAF loop) needs. */
 export interface GlobeView {
@@ -304,6 +311,10 @@ export interface GlobeView {
    * visual spin only; this one freezes the season only, orthogonal state).
    * Off by default, matching today's un-pinned season. */
   setDayHold(on: boolean): void;
+  /** Switch the render style (Task 1: `faceted` flat-shades the surface
+   * material; `voxel`/`terraced` are smooth-geometry-for-now until their own
+   * tasks land — the switch is always safe, never throws). */
+  setStyle(style: GlobeStyle): void;
 }
 
 /** Diff two tile-leaf sets by key: `added` are `next` tiles whose key was not
@@ -955,6 +966,20 @@ export function createGlobeView(
     nightFill.intensity = on ? NIGHT_FILL_INTENSITY : 0;
   }
 
+  // The render-style axis (The Massing): `material` is one object shared
+  // across every tile slot (`buildTileSlot`, above), so flipping its
+  // `flatShading` flag here repaints every already-built tile without a
+  // rebuild — flat shading only recomputes per-face normals from the
+  // existing geometry. `voxel`/`terraced` have no geometry of their own yet
+  // (later tasks), so they fall through to today's smooth build; the switch
+  // never throws.
+  let activeStyle: GlobeStyle = 'smooth';
+  function setStyle(style: GlobeStyle): void {
+    activeStyle = style;
+    material.flatShading = activeStyle === 'faceted';
+    material.needsUpdate = true;
+  }
+
   let selectedGroup: string | null = null;
   function setSelected(featureName: string | null): void {
     selectedGroup = featureName === null ? null : `feature-${featureName}`;
@@ -1042,6 +1067,7 @@ export function createGlobeView(
     setNightFill,
     setSeasonalHold,
     setDayHold,
+    setStyle,
     onRegion,
   };
 }

@@ -1,4 +1,4 @@
-import { beforeAll, expect, test } from 'vitest';
+import { beforeAll, expect, test, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   GLOBE_RADIUS,
@@ -698,4 +698,37 @@ test('water is visible under natural only — hidden under every data lens', () 
   expect(ocean.visible).toBe(false);
   view.setLens(naturalLens);
   expect(ocean.visible).toBe(true);
+});
+
+/** The shared surface material off the first mounted `globe-tile-*` mesh —
+ * `material` is one object reused across every tile slot (`globe.ts`'s
+ * `buildTileSlot`), so any one tile's material is the whole surface's. */
+function surfaceMaterial(globe: ReturnType<typeof createGlobeView>): THREE.MeshStandardMaterial {
+  let mesh: THREE.Mesh | null = null;
+  globe.object3d.traverse((o) => {
+    if (!mesh && o.name.startsWith('globe-tile-')) mesh = o as THREE.Mesh;
+  });
+  return (mesh as unknown as THREE.Mesh).material as THREE.MeshStandardMaterial;
+}
+
+test('setStyle("faceted") flat-shades the surface material; "smooth" restores smooth shading', () => {
+  const view = createGlobeView(markerTiles([]), spinningSys());
+  const mat = surfaceMaterial(view);
+  expect(mat.flatShading).toBe(false);
+  // `Material.needsUpdate` (three.js) is a write-only accessor — it has no
+  // getter, so reading it back is always `undefined` regardless of what was
+  // set. Spy on the setter itself to confirm `setStyle` actually flips it.
+  const needsUpdateSpy = vi.spyOn(mat, 'needsUpdate', 'set');
+  view.setStyle('faceted');
+  expect(mat.flatShading).toBe(true);
+  expect(needsUpdateSpy).toHaveBeenCalledWith(true);
+  view.setStyle('smooth');
+  expect(mat.flatShading).toBe(false);
+});
+
+test('setStyle never throws for voxel or terraced (smooth-geometry-for-now)', () => {
+  const view = createGlobeView(markerTiles([]), spinningSys());
+  expect(() => view.setStyle('voxel')).not.toThrow();
+  expect(() => view.setStyle('terraced')).not.toThrow();
+  expect(() => view.setStyle('smooth')).not.toThrow();
 });
