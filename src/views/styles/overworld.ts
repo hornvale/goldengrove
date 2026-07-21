@@ -7,8 +7,10 @@
  * ordered (Bayer) dithering — a land or ocean pixel now alternates between
  * its class's `light`/`dark` tone pair by a fixed 4x4 threshold matrix
  * (`BAYER_4`), biased by the node's elevation relative to sea level so the
- * dither also reads as coarse relief shading (higher land / shallower water
- * leans `light`). Later tasks (crafted coastlines, Task 3; biome-boundary
+ * dither also reads as coarse relief shading (higher land leans `light`;
+ * ocean elevation is always at or below sea level, so shallower water only
+ * reaches a neutral 50/50 split, never a `light`-leaning bias beyond
+ * neutral). Later tasks (crafted coastlines, Task 3; biome-boundary
  * outlines, Task 4) layer on top of this same fill — none of those change
  * which class a node resolves to, only how it's painted, so the class
  * resolution below mirrors `pixelBase.ts`'s `pixelColorFor` exactly (same
@@ -142,8 +144,11 @@ const OVERWORLD_RELIEF_SCALE_M = 2000;
 /** This node's dither bias in `[-1, 1]`: how far `elevationM` sits above (+)
  * or below (-) `referenceM`, scaled by `scaleM` and clamped. Shared by land
  * (relative to sea level, `OVERWORLD_RELIEF_SCALE_M`) and ocean (relative to
- * sea level, `OCEAN_DEEP_THRESHOLD_M`) so both read "higher/shallower leans
- * light, lower/deeper leans dark" the same way. */
+ * sea level, `OCEAN_DEEP_THRESHOLD_M`) so both use the same "higher/shallower
+ * leans light, lower/deeper leans dark" formula — but only land can reach a
+ * positive bias (elevation above the reference); ocean nodes are always at
+ * or below sea level, so the ocean bias is always `<= 0` and shallow water
+ * reaches at most a neutral 50/50 split, never a `light`-leaning bias. */
 function elevationBias(elevationM: number, referenceM: number, scaleM: number): number {
   return Math.max(-1, Math.min(1, (elevationM - referenceM) / scaleM));
 }

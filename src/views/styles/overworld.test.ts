@@ -98,10 +98,19 @@ describe('overworldRGBA — palette fill', () => {
     const region = miniRegion();
     const buf = overworldRGBA(region, 8); // 8x8 output
     expect(buf.length).toBe(8 * 8 * 4);
-    // a pixel over the ocean cell (node 0, top-left) is an ocean tone
-    expect(pixelAt(buf, 8, 1, 1)).toEqual(OVERWORLD_PALETTE.ocean.shallow);
-    // a pixel over the forest cells (nodes 1-3) is that biome's light tone
-    expect(pixelAt(buf, 8, 6, 6)).toEqual(OVERWORLD_PALETTE.biome['temperate-forest']!.light);
+    // a pixel over the ocean cell (node 0, top-left) is one of the ocean
+    // tones — membership, not a specific tone, so this doesn't couple to
+    // BAYER_4/OVERWORLD_DITHER_STRENGTH's threshold (Task 5 retunes those);
+    // a wrong nearest-node resolution would still land outside this set.
+    expect([OVERWORLD_PALETTE.ocean.shallow, OVERWORLD_PALETTE.ocean.deep]).toContainEqual(
+      pixelAt(buf, 8, 1, 1),
+    );
+    // a pixel over the forest cells (nodes 1-3) is one of that biome's tones
+    // — same membership rationale.
+    expect([
+      OVERWORLD_PALETTE.biome['temperate-forest']!.light,
+      OVERWORLD_PALETTE.biome['temperate-forest']!.dark,
+    ]).toContainEqual(pixelAt(buf, 8, 6, 6));
     expect(alphaAt(buf, 8, 4, 4)).toBe(255);
   });
 
