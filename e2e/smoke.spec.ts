@@ -383,6 +383,51 @@ test('the diorama: switching back to pixel restores the flat map (The Diorama, T
   expect(errors).toEqual([]);
 });
 
+test('the overworld: the pixel map style renders non-blank and console-clean, including a pixel->voxel->pixel round trip (The Overworld, Task 5)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+  page.on('pageerror', (err) => errors.push(String(err)));
+
+  await page.goto('#seed=42');
+  await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
+
+  // Map is not URL-addressable — reach it via globe first (same idiom as
+  // the diorama tests above).
+  await page.locator('.hud-view').selectOption('globe');
+  await page.waitForTimeout(2_500);
+  await page.locator('.hud-view').selectOption('map');
+  await page.waitForTimeout(3_000);
+
+  const mapCanvas = page.locator('canvas.view-canvas').nth(2);
+  await expect(mapCanvas).toBeVisible();
+
+  const mapStyleSelect = page.locator('.hud-map-style');
+  await expect(mapStyleSelect).toHaveCount(1);
+
+  // pixel is the overworld renderer's entry point (mapView.ts's pixel
+  // branch builds `overworldTexture`) — select it and confirm a real,
+  // non-blank frame lands. A VIEWPORT screenshot, not an element/locator
+  // one, per the same rationale as the diorama tests (the WebGL canvas
+  // continuously re-renders, so a locator screenshot's stability wait can
+  // time out).
+  await mapStyleSelect.selectOption('pixel');
+  await page.waitForTimeout(500);
+  const pixelShot = await page.screenshot();
+  expect(pixelShot.length).toBeGreaterThan(5_000);
+
+  // Round-trip: pixel -> voxel -> pixel must stay clean (no leaked GPU
+  // resources/state from tearing down and rebuilding the overworld texture
+  // twice) and still render.
+  await mapStyleSelect.selectOption('voxel');
+  await page.waitForTimeout(500);
+  await mapStyleSelect.selectOption('pixel');
+  await page.waitForTimeout(500);
+  const roundTripShot = await page.screenshot();
+  expect(roundTripShot.length).toBeGreaterThan(5_000);
+
+  expect(errors).toEqual([]);
+});
+
 test('the style roster: every render style renders the globe non-blank and transformed', async ({ page }) => {
   test.setTimeout(240_000);
   const errors: string[] = [];
