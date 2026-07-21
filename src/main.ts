@@ -645,6 +645,10 @@ function mountViews(
       globeView.setStyle(id);
       hud.setGlobeStyle(id);
     },
+    onMapStyle(id) {
+      mapView.setStyle(id);
+      hud.setMapStyle(id);
+    },
     onWinds() {
       windsOn = !windsOn;
       globeView.setWinds(windsOn);
@@ -710,6 +714,7 @@ function mountViews(
   hud.setLens(naturalLens, naturalLens.legend(tiles)); // the picker and the globe agree from the first frame
   hud.setStyle(styleById('photoreal')); // the picker and the pipeline agree from the first frame
   hud.setGlobeStyle('smooth'); // the picker and the globe's default GlobeStyle agree from the first frame
+  hud.setMapStyle('voxel'); // the picker and the map view's default MapStyle agree from the first frame
   hud.setWindsAvailable(
     tiles.circulationBands !== null,
     'no circulation bands: this world is tidally locked',

@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildHud, GLOBE_STYLES, SPEED_STEPS } from './hud';
+import { buildHud, GLOBE_STYLES, MAP_STYLES, SPEED_STEPS } from './hud';
 import { LENSES, moistureLens } from '../views/lens';
 import { photorealStyle } from '../views/renderStyle';
 import type { EclipseEvent } from '../sim/scene';
 import type { ZoomTarget } from '../views/zoom';
 import type { GlobeStyle } from '../views/globe';
+import type { MapStyle } from '../views/mapView';
 
 describe('buildHud interactions', () => {
-  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onView(_: ZoomTarget) {}, onScrub(_: number) {}, onLens(_: string) {}, onStyle(_: string) {}, onGlobeStyle(_: GlobeStyle) {}, onWinds() {}, onCurrents() {}, onClouds() {}, onEclipseMark(_: EclipseEvent) {}, onFreezeSpin() {}, onDayHold() {}, onWaves() {}, onGlint() {}, onNightFill() {} };
+  const noop = { onPlayPause() {}, onSpeed(_: number) {}, onTrueScale() {}, onReroll() {}, onShare() {}, onDateJump(_: number, __: number) {}, onView(_: ZoomTarget) {}, onScrub(_: number) {}, onLens(_: string) {}, onStyle(_: string) {}, onGlobeStyle(_: GlobeStyle) {}, onMapStyle(_: MapStyle) {}, onWinds() {}, onCurrents() {}, onClouds() {}, onEclipseMark(_: EclipseEvent) {}, onFreezeSpin() {}, onDayHold() {}, onWaves() {}, onGlint() {}, onNightFill() {} };
 
   it('share button fires onShare and flashes', () => {
     const root = document.createElement('div');
@@ -212,6 +213,33 @@ describe('buildHud interactions', () => {
     const select = root.querySelector('select[name="style-select"]') as HTMLSelectElement;
     hud.setGlobeStyle('voxel');
     expect(select.value).toBe('voxel');
+    expect(calls).toBe(0);
+  });
+
+  // The Diorama's map-style (`MapStyle`) picker — a THIRD axis, distinct
+  // from both the post-process `RenderStyle` (`onStyle`/`setStyle`/
+  // `hud-styles`) and the globe's `GlobeStyle` (`onGlobeStyle`/
+  // `setGlobeStyle`/`hud-style`) above. Mirrors the globe-style dropdown's
+  // construction and test shape exactly.
+  it('map-style dropdown offers voxel/pixel and reports the chosen id', () => {
+    const root = document.createElement('div');
+    const chosen: MapStyle[] = [];
+    buildHud(root, '42', { ...noop, onMapStyle: (id: MapStyle) => { chosen.push(id); } });
+    const select = root.querySelector('select[name="map-style-select"]') as HTMLSelectElement;
+    const values = [...select.options].map((o) => o.value);
+    expect(values).toEqual(MAP_STYLES.map((s) => s.id));
+    select.value = 'pixel';
+    select.dispatchEvent(new Event('change'));
+    expect(chosen).toEqual(['pixel']);
+  });
+
+  it('setMapStyle reflects the current style without firing onMapStyle', () => {
+    const root = document.createElement('div');
+    let calls = 0;
+    const hud = buildHud(root, '42', { ...noop, onMapStyle: () => { calls++; } });
+    const select = root.querySelector('select[name="map-style-select"]') as HTMLSelectElement;
+    hud.setMapStyle('pixel');
+    expect(select.value).toBe('pixel');
     expect(calls).toBe(0);
   });
 
