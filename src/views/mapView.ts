@@ -52,7 +52,7 @@ export const MAP_VOXEL_BAND_M = 250;
  * distance on both the globe and the flat diorama. A first-pass value —
  * the tuning knob for the campaign's mandatory visual framing pass
  * (Task 4). */
-export const MAP_VOXEL_HEIGHT_SCALE = 120;
+export const MAP_VOXEL_HEIGHT_SCALE = 800;
 
 /** True isometric camera offset: elevation `atan(1/√2) ≈ 35.264°`, azimuth
  * 45°. Positioning the camera at `(d, d, d)` looking at the origin with
