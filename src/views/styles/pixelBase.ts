@@ -10,8 +10,8 @@ const quant = (c: number): number => Math.min(255, Math.round(c / PIXEL_STEP) * 
 /** Ocean is depth-toned (two flat blues), keyed by the tile's own elevation vs
  * sea level — a hard, unlit coastline with a legible deep/shallow read, the
  * reference-map look. */
-const OCEAN_DEEP: readonly [number, number, number] = [30, 60, 110];
-const OCEAN_SHALLOW: readonly [number, number, number] = [58, 108, 168];
+const OCEAN_DEEP: readonly [number, number, number] = [26, 66, 132];
+const OCEAN_SHALLOW: readonly [number, number, number] = [58, 138, 200];
 /** How far below sea level (m) a tile must be to read as "deep". Visual-tuned. */
 const OCEAN_DEEP_THRESHOLD_M = 1200;
 
@@ -21,18 +21,18 @@ const OCEAN_DEEP_THRESHOLD_M = 1200;
  * as a blown-out blob), so every biome stays legible on a flat globe. Names
  * are hornvale's kebab-case `Biome::name`. Visual-pass-tuned. */
 const PIXEL_LAND_RGB: Readonly<Record<string, readonly [number, number, number]>> = {
-  ice: [198, 222, 236], // light cyan, deliberately not white
-  tundra: [150, 160, 140],
-  taiga: [52, 92, 68],
-  'temperate-grassland': [138, 178, 92],
-  shrubland: [172, 162, 104],
-  'temperate-forest': [70, 122, 64],
-  'temperate-rainforest': [46, 104, 62],
-  desert: [224, 198, 128],
-  savanna: [200, 176, 96],
-  'tropical-seasonal-forest': [112, 158, 72],
-  'tropical-rainforest': [42, 112, 56],
-  alpine: [156, 150, 142], // warm grey — distinct from ice
+  ice: [206, 230, 242], // light cyan, deliberately not white
+  tundra: [160, 172, 138],
+  taiga: [46, 110, 74], // richer boreal green
+  'temperate-grassland': [126, 196, 84], // brighter meadow
+  shrubland: [186, 174, 96],
+  'temperate-forest': [56, 140, 66], // punchy forest green
+  'temperate-rainforest': [34, 120, 66],
+  desert: [238, 208, 120], // brighter sand
+  savanna: [214, 188, 88],
+  'tropical-seasonal-forest': [112, 182, 70],
+  'tropical-rainforest': [28, 132, 60], // vivid jungle
+  alpine: [172, 166, 154], // warm grey — distinct from ice
 };
 
 /** Data-native pixel base: colour comes from the tile's biome/ocean DATUM, not
