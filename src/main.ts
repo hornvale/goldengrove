@@ -827,7 +827,13 @@ function mountViews(
    * (`pendingMapKey`, set by the globe->map handoff above). */
   function deliverRegion(key: string, region: RegionScene): void {
     globeView.onRegion(key, region);
-    if (key === pendingMapKey) mapView.setRegion(region);
+    if (key === pendingMapKey) {
+      mapView.setRegion(region);
+      // Consume it: the globe's own LOD re-requests this same level-3 tile as
+      // it reselects, and a stale match would rebuild the (invisible) map quad
+      // + sprite materials while on the globe rung. The next handoff re-sets it.
+      pendingMapKey = null;
+    }
   }
 
   return { globe: globeView, deliverRegion };

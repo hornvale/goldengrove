@@ -1,5 +1,4 @@
 import type { TilesScene } from '../../sim/scene';
-export { clusterFeatures } from '../globe';
 
 /** A land local-maximum tile, drawn as a peak symbol. */
 export interface Peak { lat: number; lon: number; elevationM: number; tileIndex: number; }

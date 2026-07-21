@@ -34,6 +34,11 @@ export function regionPixelTexture(region: RegionScene): THREE.DataTexture {
   const tex = new THREE.DataTexture(regionPixelRGBA(region), dim, dim, THREE.RGBAFormat);
   tex.minFilter = THREE.NearestFilter;
   tex.magFilter = THREE.NearestFilter;
+  // `regionPixelRGBA` is row-major top-down (row 0 = grid gy=0), and the
+  // symbol overlay (`mapSymbols` `gridToWorld`) places gy=0 at the quad's TOP.
+  // DataTexture's default `flipY:false` would draw row 0 at the BOTTOM, mirroring
+  // the base against the symbols. Flip so both agree — symbols land on their terrain.
+  tex.flipY = true;
   tex.needsUpdate = true;
   return tex;
 }
