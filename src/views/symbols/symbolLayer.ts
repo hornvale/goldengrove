@@ -1,7 +1,8 @@
 /** The symbol layer: a `THREE.Group` of sprites (mountain peaks, forest
  * tree-clusters, ocean wave-marks) placed on the globe, selected per zoom
- * rung against the salience budget (`./budget`), culled to the near
- * hemisphere (`../globe`'s `onNearSide`). This is the visible payoff of The
+ * rung against the salience budget (`./budget`), culled to a cap around the
+ * sub-camera point (`NEAR_CULL_COS`, tighter than the limb so depthTest:false
+ * sprites never pile into a jumbled edge band). This is the visible payoff of The
  * Cartographer. Settlements are NOT drawn here — the globe's own always-on
  * markers (`../globe`'s `buildSiteMarker`) already cover them, so this layer
  * stays peaks+forests+waves only to avoid doubling up.
@@ -12,7 +13,7 @@
  */
 import * as THREE from 'three';
 import type { TilesScene } from '../../sim/scene';
-import { GLOBE_RADIUS, latLonToUnit, onNearSide } from '../globe';
+import { GLOBE_RADIUS, latLonToUnit } from '../globe';
 import type { Peak, ForestRegion } from './extract';
 import { extractForests, extractPeaks } from './extract';
 import type { Rung } from './budget';
@@ -33,20 +34,25 @@ export function hash01(i: number): number {
  * `../globe`'s `MARKER_CLEARANCE` idiom) a symbol sprite floats. */
 const SYMBOL_CLEARANCE = 1.01;
 
+/** Minimum cos(angle) from the sub-camera point for a symbol to render — hides
+ * symbols before the limb (not at it), so depthTest:false sprites never pile
+ * into a jumbled, detached band along the globe's edge. ~0.34 ≈ within 70°. */
+const NEAR_CULL_COS = 0.58;
+
 /** Peak sprite scale bounds, in units of `GLOBE_RADIUS` — a tall peak reads
  * bigger than a modest one, clamped so an extreme elevation never dwarfs the
  * globe. Sized up over the visual pass (the original 0.02–0.08 were too small
  * to read); the elevation-proportional term is unchanged. */
-const PEAK_SCALE_MIN = 0.055;
+const PEAK_SCALE_MIN = 0.08;
 const PEAK_SCALE_ELEVATION_FACTOR = 0.00001;
-const PEAK_SCALE_MAX = 0.16;
+const PEAK_SCALE_MAX = 0.19;
 
 /** Tree sprite scale, in units of `GLOBE_RADIUS`. */
-const TREE_SCALE = 0.035;
+const TREE_SCALE = 0.052;
 
 /** Wave-mark sprite scale, in units of `GLOBE_RADIUS` — modest and fixed
  * (unlike peaks, waves don't carry a magnitude to scale against). */
-const WAVE_SCALE = 0.06;
+const WAVE_SCALE = 0.075;
 
 /** Wave marks float closer to the ocean surface than the
  * `SYMBOL_CLEARANCE`-lofted peak/tree sprites — they're a texture accent, not
@@ -143,8 +149,8 @@ function buildWaveMaterial(): THREE.SpriteMaterial {
 export type SymbolKind = 'peak' | 'tree' | 'wave';
 
 /** A built sprite tagged with the unit "up" direction it was placed at, so
- * the near-side cull (`onNearSide`) doesn't need to re-derive it from
- * position/GLOBE_RADIUS each frame, plus its symbol kind. `clearance`
+ * the near cull doesn't need to re-derive it from position/GLOBE_RADIUS each
+ * frame, plus its symbol kind. `clearance`
  * defaults to the peak/tree float height; wave marks pass `WAVE_CLEARANCE`
  * to sit closer to the ocean surface. */
 function placedSprite(
@@ -238,9 +244,15 @@ export function buildSymbolLayer(tiles: TilesScene): SymbolLayer {
       rebuild(rung);
       lastRung = rung;
     }
+    // Hide symbols WELL BEFORE the geometric horizon, not at it: sprites are
+    // depthTest:false and float above the surface, so near the limb they
+    // foreshorten into a jumbled band and appear detached from the curved
+    // edge. Require the surface point to face the camera by at least
+    // `NEAR_CULL_COS` (cos of the angle from the sub-camera point).
+    const d = camWorld.length();
     for (const child of group.children) {
       const up = child.userData.up as THREE.Vector3 | undefined;
-      if (up) child.visible = onNearSide(up, camWorld, GLOBE_RADIUS);
+      if (up) child.visible = d > 0 && up.dot(camWorld) / d > NEAR_CULL_COS;
     }
   }
 
