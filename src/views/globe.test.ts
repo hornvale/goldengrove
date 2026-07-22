@@ -1,4 +1,4 @@
-import { beforeAll, expect, test, vi } from 'vitest';
+import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   GLOBE_RADIUS,
@@ -112,6 +112,22 @@ function pump(view: ReturnType<typeof createGlobeView>, camera: THREE.Camera, n 
   for (let i = 0; i < n; i++) view.update(0, camera);
 }
 
+// Lift the drain's per-frame TIME budget for the whole globe suite so the build
+// queue drains at the count cap (MAX_BUILDS_PER_FRAME) on any machine. Without
+// this, a slow CI box drains ~1 tile/frame while a fast dev box drains ~6, so a
+// fixed `pump` that finishes the (LOD-deep) queue locally leaves it undrained in
+// CI — the environment-dependent failure that these `pump`-based tests hit. The
+// count cap stays in force, so progressive-drain behaviour is unchanged.
+const buildBudgetHost = globalThis as { __buildBudgetMs?: number };
+let savedBuildBudget: number | undefined;
+beforeAll(() => {
+  savedBuildBudget = buildBudgetHost.__buildBudgetMs;
+  buildBudgetHost.__buildBudgetMs = Number.POSITIVE_INFINITY;
+});
+afterAll(() => {
+  buildBudgetHost.__buildBudgetMs = savedBuildBudget;
+});
+
 test('onRegion swaps only the arriving tile to region geometry — other tiles keep their geometry object; an unmounted key is a no-op', () => {
   const view = createGlobeView(markerTiles([]), spinningSys(), [], () => {});
   // Sidestep the ice blend's TilesScene-only field (see regionFixture's doc).
@@ -177,7 +193,11 @@ test('onRegion swaps only the arriving tile to region geometry — other tiles k
   // rebuild-all).
   expect(after.get(otherKey!)).toBe(otherMeshBefore);
   expect(after.get(otherKey!)!.geometry).toBe(otherGeomBefore);
-});
+  // Generous timeout: this test builds the full LOD-deep subdivision queue plus
+  // the region swap; count-capped it is fast on a dev box but slower per build
+  // on constrained CI hardware. Correctness comes from the count-capped drain
+  // (above); this only guards against a slow-box timeout, not a hang.
+}, 30_000);
 
 test('refines under autoplay spin: a still camera reaches a deep tile while the world rotates (settle keys off the user camera, not the diurnal spin)', () => {
   const view = createGlobeView(markerTiles([]), spinningSys(), [], () => {});

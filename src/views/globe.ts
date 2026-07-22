@@ -869,6 +869,14 @@ export function createGlobeView(
    * region tile changed), never mid-drain. */
   function drainBuildQueue(): void {
     const t0 = performance.now();
+    // Per-frame time budget. Overridable via a globalThis hook (same
+    // instrumentation pattern as `__btMs`/`__swapCount`) so tests can lift the
+    // TIME limit and let the count cap (`MAX_BUILDS_PER_FRAME`) govern the drain
+    // rate deterministically — otherwise a slow CI box drains ~1 tile/frame and
+    // a fixed pump can't finish the (LOD-deep) queue that a fast dev box drains
+    // in the same frames. The count cap stays intact, so progressive-drain
+    // behaviour is unchanged; only the wall-clock sensitivity is removed.
+    const budgetMs = (globalThis as { __buildBudgetMs?: number }).__buildBudgetMs ?? BUILD_BUDGET_MS;
     if (buildQueue.length > 0) {
       const scale = reliefScale();
       const built: string[] = [];
@@ -883,7 +891,7 @@ export function createGlobeView(
         tileSlots.set(key, slot);
         if (slot.isRegion) regionDirtyPending = true;
         built.push(key);
-      } while (buildQueue.length > 0 && built.length < MAX_BUILDS_PER_FRAME && performance.now() - t0 < BUILD_BUDGET_MS);
+      } while (buildQueue.length > 0 && built.length < MAX_BUILDS_PER_FRAME && performance.now() - t0 < budgetMs);
       if (built.length > 0) repaintSlots(built);
       if (swaps > 0) {
         const g = globalThis as { __swapCount?: number };
