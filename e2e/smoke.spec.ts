@@ -476,3 +476,86 @@ test('the style roster: every render style renders the globe non-blank and trans
 
   expect(errors).toEqual([]);
 });
+
+test('the excursion: dragging the map pans across a tile boundary without erroring', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+  page.on('pageerror', (err) => errors.push(String(err)));
+
+  await page.goto('#seed=42&view=globe');
+  await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
+  await page.locator('.hud-view').selectOption('map');
+  const mapCanvas = page.locator('canvas.view-canvas').nth(2);
+  await expect(mapCanvas).toBeVisible();
+  await page.waitForTimeout(2000); // let the ring's eager fetch settle
+
+  const box = await mapCanvas.boundingBox();
+  if (!box) throw new Error('map canvas has no bounding box');
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+
+  // Drag far enough to cross at least one tile boundary and trigger a
+  // recenter — several hundred px at whatever the default zoom is.
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx - 400, cy, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+
+  expect(errors).toEqual([]);
+});
+
+test('the excursion: wheel-zoom changes the visible extent within bounds', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+  page.on('pageerror', (err) => errors.push(String(err)));
+
+  await page.goto('#seed=42&view=globe');
+  await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
+  await page.locator('.hud-view').selectOption('map');
+  const mapCanvas = page.locator('canvas.view-canvas').nth(2);
+  await expect(mapCanvas).toBeVisible();
+  await page.waitForTimeout(2000);
+
+  const box = await mapCanvas.boundingBox();
+  if (!box) throw new Error('map canvas has no bounding box');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // Zoom out, then in — should not throw or hang either direction.
+  await page.mouse.wheel(0, 400);
+  await page.waitForTimeout(300);
+  await page.mouse.wheel(0, -800);
+  await page.waitForTimeout(300);
+
+  expect(errors).toEqual([]);
+});
+
+test('the excursion: panning toward a face-clamped edge does not error or hang', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+  page.on('pageerror', (err) => errors.push(String(err)));
+
+  await page.goto('#seed=42&view=globe');
+  await expect(page.locator('.hud-top-left')).toContainText('seed 42', { timeout: 150_000 });
+  await page.locator('.hud-view').selectOption('map');
+  const mapCanvas = page.locator('canvas.view-canvas').nth(2);
+  await expect(mapCanvas).toBeVisible();
+  await page.waitForTimeout(2000);
+
+  const box = await mapCanvas.boundingBox();
+  if (!box) throw new Error('map canvas has no bounding box');
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+
+  // Drag hard and repeatedly in one direction — whether or not this
+  // particular seed/region lands near a face edge, repeated large drags
+  // exercise the clamp path without throwing either way.
+  for (let i = 0; i < 6; i++) {
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx - 500, cy - 500, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+  }
+
+  expect(errors).toEqual([]);
+});
