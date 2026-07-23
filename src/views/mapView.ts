@@ -3,16 +3,16 @@
  * region under a `MapStyle` switch (campaign "The Diorama"): either the
  * original flat pixel-art quad (`./mapTexture`, `./mapSymbols`) or a
  * Voxel-2.5D relief diorama (`./worldMesh`'s `buildVoxelHeightfieldGeometry`)
- * under a fixed-isometric camera. A later task wires this view into the
- * app's render loop and zoom ladder (Task 4), driving the symbol rung from
- * the map camera's zoom instead of the fixed `'near'` used under `'pixel'`
- * here. */
+ * under a fixed-isometric camera. The center tile's symbol overlay (under
+ * `'pixel'`) is driven by the real camera zoom (`./symbols/budget`'s
+ * `rungForMapZoom`, wired via `mountTileAt`/`updateSymbolRung` below). */
 import * as THREE from "three";
 import { MapControls } from "three/addons/controls/MapControls.js";
 import type { RegionScene } from "../sim/scene";
 import { overworldTexture } from "./mapTexture";
 import type { MapSymbols } from "./mapSymbols";
 import { buildMapSymbols } from "./mapSymbols";
+import { rungForMapZoom, type Rung } from "./symbols/budget";
 import { buildVoxelHeightfieldGeometry } from "./worldMesh";
 import { pixelColorFor } from "./styles/pixelBase";
 import type { TileId } from "./cubeSphere";
@@ -390,11 +390,12 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     let tileSymbols: MapSymbols | null = null;
     if (isCenter && activeStyle === "pixel") {
       tileSymbols = buildMapSymbols(region);
-      tileSymbols.update("near"); // Task 6 wires this to the real camera zoom
+      tileSymbols.update(rungForMapZoom(camera.zoom));
       positionAt(tileSymbols.group, offset.dx, offset.dy);
       scene.add(tileSymbols.group);
     }
     mounted.set(key, { mesh: m, symbols: tileSymbols, addr });
+    if (isCenter) lastSymbolRung = tileSymbols ? rungForMapZoom(camera.zoom) : null;
   }
 
   /** Request every not-yet-cached, not-yet-pending address in `addresses`
@@ -498,6 +499,22 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     if (next) recenterTo(next);
   }
 
+  /** Re-evaluates the center tile's symbol rung against the current camera
+   * zoom every frame — cheap (one comparison chain) on the common
+   * unchanged-rung path, since `MapSymbols.update` itself is a no-op-cost
+   * early return only in the sense that rebuilding the same rung twice is
+   * wasted work, not incorrect; guard on the rung actually changing. */
+  let lastSymbolRung: Rung | null = null;
+  function updateSymbolRung(): void {
+    if (activeStyle !== "pixel" || !centerAddr) return;
+    const entry = mounted.get(tileKey(centerAddr));
+    if (!entry || !entry.symbols) return;
+    const rung = rungForMapZoom(camera.zoom);
+    if (rung === lastSymbolRung) return;
+    lastSymbolRung = rung;
+    entry.symbols.update(rung);
+  }
+
   function setRegion(region: RegionScene | null): void {
     clearAllMounted();
     regionCache.clear();
@@ -532,6 +549,7 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     controls.update();
     clampPan();
     maybeRecenter();
+    updateSymbolRung();
     renderer.render(scene, camera);
   }
 

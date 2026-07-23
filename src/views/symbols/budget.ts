@@ -28,6 +28,18 @@ export function rungForZoom(visibleAngularRadiusRad: number): Rung {
   return 'near';
 }
 
+/** Coarser rung when the map camera is zoomed further out — the flat map's
+ * analog of `rungForZoom` above, but keyed on the orthographic camera's own
+ * `.zoom` factor (1 = the base single-tile frustum; below 1 is zoomed out,
+ * above 1 is zoomed in) rather than an angular radius, since the map has no
+ * sphere to subtend an angle against. Boundaries are a first-pass visual
+ * guess, same convention as `rungForZoom`'s. */
+export function rungForMapZoom(cameraZoom: number): Rung {
+  if (cameraZoom < 0.5) return 'far';
+  if (cameraZoom < 2) return 'mid';
+  return 'near';
+}
+
 /** Items arrive pre-sorted by salience (Task 2); take the first `budget`. */
 export function selectByBudget<T>(items: T[], budget: number): T[] {
   return items.slice(0, Math.max(0, budget));

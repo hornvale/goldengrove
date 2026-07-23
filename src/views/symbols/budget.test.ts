@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { rungForZoom, selectByBudget, RUNG_BUDGETS } from './budget';
+import { rungForMapZoom, rungForZoom, selectByBudget, RUNG_BUDGETS } from './budget';
 
 test('rung coarsens as the visible arc widens', () => {
   expect(rungForZoom(2.0)).toBe('far');
@@ -14,4 +14,10 @@ test('selectByBudget takes the top-N pre-sorted items', () => {
 test('budgets grow richer from far to near', () => {
   expect(RUNG_BUDGETS.near.peaks).toBeGreaterThan(RUNG_BUDGETS.far.peaks);
   expect(RUNG_BUDGETS.near.peakMinElevationM).toBeLessThan(RUNG_BUDGETS.far.peakMinElevationM);
+});
+
+test('rungForMapZoom: zoomed out reads far, zoomed in reads near', () => {
+  expect(rungForMapZoom(0.3)).toBe('far');
+  expect(rungForMapZoom(1)).toBe('mid');
+  expect(rungForMapZoom(3)).toBe('near');
 });
