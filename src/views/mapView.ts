@@ -8,6 +8,7 @@
  * the map camera's zoom instead of the fixed `'near'` used under `'pixel'`
  * here. */
 import * as THREE from "three";
+import { MapControls } from "three/addons/controls/MapControls.js";
 import type { RegionScene } from "../sim/scene";
 import { overworldTexture } from "./mapTexture";
 import type { MapSymbols } from "./mapSymbols";
@@ -123,6 +124,16 @@ export const MAP_CACHE_HALO_RADIUS = 2;
  * `LOD_MERGE_FACTOR` split/merge hysteresis. */
 export const RECENTER_HYSTERESIS_FRACTION = 0.1;
 
+/** Zoomed all the way out, the whole `MAP_RING_RADIUS` ring should be
+ * visible without exposing its own edge — `1 / (2·radius + 1)` frames the
+ * ring exactly; the extra `1.1` divisor leaves a small margin so the ring's
+ * outermost edge doesn't sit flush against the viewport border. */
+export const MAP_MIN_ZOOM = 1 / ((2 * MAP_RING_RADIUS + 1) * 1.1);
+
+/** Zoomed all the way in — a first-pass "close-up on about a quarter of one
+ * tile" value; a visual pass may retune it. */
+export const MAP_MAX_ZOOM = 4;
+
 /** The map view's public surface: a mountable scene graph plus the per-frame
  * driver a caller (the app's render loop, Task 4) needs. */
 export interface MapView {
@@ -131,6 +142,12 @@ export interface MapView {
   /** The map's shared camera. Under `'pixel'` it looks down the +z axis at
    * the origin; under `'voxel'` it sits at the fixed isometric offset. */
   camera: THREE.OrthographicCamera;
+  /** Pan (drag) + zoom (wheel) controls, shared by both styles — only
+   * position/zoom change between styles, never the fixed camera angle
+   * (`enableRotate` stays `false`). Exposed (not fully private) so tests can
+   * drive/inspect it directly; `render` is the only method real callers
+   * need to invoke it through. */
+  controls: MapControls;
   /** Show `region` under the active `MapStyle`, mounted alone at the local
    * origin with no ring/network involvement; `null` clears it. This is the
    * synchronous, data-already-in-hand path (used directly by tests and by
@@ -170,10 +187,20 @@ export interface CreateMapViewOptions {
    * function `main.ts` already passes to `createGlobeView`. Omit only for
    * tests/callers that exclusively use the synchronous `setRegion` path. */
   requestRegion?: (tile: TileId) => void;
+  /** The element `MapControls` listens on for drag/wheel input — `main.ts`
+   * passes the real `mapCanvas` (Task 4 wires this) so pointer/wheel events
+   * from the visible canvas actually reach the controls. `OrbitControls`'
+   * constructor unconditionally touches `domElement.style`, so this can't be
+   * left `undefined`; omitting it falls back to a detached, never-rendered
+   * `<canvas>` that satisfies the constructor without needing a real DOM
+   * (used by unit tests, which drive pan/zoom by writing to
+   * `controls.target`/`controls.object.zoom` directly rather than dispatching
+   * real pointer events). */
+  domElement?: HTMLElement;
 }
 
 export function createMapView(options: CreateMapViewOptions = {}): MapView {
-  const { requestRegion } = options;
+  const { requestRegion, domElement = document.createElement("canvas") } = options;
   const scene = new THREE.Scene();
   scene.name = "map-root";
 
@@ -201,6 +228,11 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
   scene.add(light.target);
   const ambient = new THREE.AmbientLight(0xffffff, VOXEL_AMBIENT_INTENSITY);
   scene.add(ambient);
+
+  const controls = new MapControls(camera, domElement);
+  controls.enableRotate = false;
+  controls.minZoom = MAP_MIN_ZOOM;
+  controls.maxZoom = MAP_MAX_ZOOM;
 
   /** One ring member's mounted state: its mesh (positioned at its
    * origin-relative offset) and, for the center tile only, its symbol
@@ -433,6 +465,39 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     requestMissing(ringAddresses(newCenter, MAP_RING_RADIUS));
   }
 
+  /** The world-unit box `controls.target` must stay within, given the
+   * current ring — converts `mapRing.ts`'s tile-unit bounds to world units
+   * and the active style's plane (X–Z for voxel, X–Y for pixel). */
+  function clampPan(): void {
+    if (!originAddr || !centerAddr) return;
+    const bounds = panBoundsInTiles(centerAddr, originAddr, MAP_RING_RADIUS);
+    const minX = bounds.minDx * MAP_VOXEL_EXTENT;
+    const maxX = bounds.maxDx * MAP_VOXEL_EXTENT;
+    // Y bounds are the negated Dy bounds (positionAt's sign convention),
+    // so min/max swap.
+    const minSecond = -bounds.maxDy * MAP_VOXEL_EXTENT;
+    const maxSecond = -bounds.minDy * MAP_VOXEL_EXTENT;
+    controls.target.x = Math.min(maxX, Math.max(minX, controls.target.x));
+    if (activeStyle === "voxel") {
+      controls.target.z = Math.min(maxSecond, Math.max(minSecond, controls.target.z));
+    } else {
+      controls.target.y = Math.min(maxSecond, Math.max(minSecond, controls.target.y));
+    }
+  }
+
+  /** Checks `controls.target` against the recenter-hysteresis boundary and
+   * recenters the ring if the camera has drifted solidly into a neighbor's
+   * footprint. Called every frame from `render` (cheap: a handful of
+   * arithmetic comparisons, no allocation on the common no-op path). */
+  function maybeRecenter(): void {
+    if (!originAddr || !centerAddr) return;
+    const localX = controls.target.x / MAP_VOXEL_EXTENT;
+    const secondAxis = activeStyle === "voxel" ? controls.target.z : controls.target.y;
+    const localY = -secondAxis / MAP_VOXEL_EXTENT;
+    const next = recenterTarget(originAddr, centerAddr, localX, localY, RECENTER_HYSTERESIS_FRACTION);
+    if (next) recenterTo(next);
+  }
+
   function setRegion(region: RegionScene | null): void {
     clearAllMounted();
     regionCache.clear();
@@ -464,6 +529,9 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
   }
 
   function render(renderer: THREE.WebGLRenderer): void {
+    controls.update();
+    clampPan();
+    maybeRecenter();
     renderer.render(scene, camera);
   }
 
@@ -473,5 +541,5 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     regionPending.clear();
   }
 
-  return { scene, camera, setRegion, beginRegion, onRegion, setStyle, render, dispose };
+  return { scene, camera, controls, setRegion, beginRegion, onRegion, setStyle, render, dispose };
 }

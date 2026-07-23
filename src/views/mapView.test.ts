@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import * as THREE from "three";
-import { createMapView, ISO_CAMERA_DISTANCE, MAP_VOXEL_EXTENT } from "./mapView";
+import { createMapView, ISO_CAMERA_DISTANCE, MAP_RING_RADIUS, MAP_VOXEL_EXTENT } from "./mapView";
 import type { RegionScene } from "../sim/scene";
 import type { TileId } from "./cubeSphere";
 import { tileKey } from "./cubeSphere";
@@ -244,5 +244,43 @@ describe("neighbor-tile ring (The Excursion)", () => {
     v.onRegion(tileKey(east), fakeRegionAt(east));
     const symbolGroups = v.scene.children.filter((c) => c.name === "map-symbols");
     expect(symbolGroups).toHaveLength(1);
+  });
+});
+
+describe("camera pan/zoom (The Excursion)", () => {
+  test("MapControls is attached with rotation disabled", () => {
+    const v = createMapView({ requestRegion: () => {} });
+    expect(v.controls.enableRotate).toBe(false);
+  });
+
+  test("minZoom/maxZoom are set and minZoom < 1 < maxZoom (can zoom both out and in)", () => {
+    const v = createMapView({ requestRegion: () => {} });
+    expect(v.controls.minZoom).toBeLessThan(1);
+    expect(v.controls.maxZoom).toBeGreaterThan(1);
+  });
+
+  test("panning the camera target past the ring's edge is clamped on render", () => {
+    const v = createMapView({ requestRegion: () => {} });
+    const center: TileId = { face: 0, level: 3, ix: 4, iy: 4 };
+    v.beginRegion(center);
+    // Push the target way out past any legal ring bound.
+    v.controls.target.set(1000, 0, 0);
+    v.render({ render: () => {} } as unknown as THREE.WebGLRenderer);
+    const maxWorldDx = (MAP_RING_RADIUS + 0.5) * MAP_VOXEL_EXTENT;
+    expect(Math.abs(v.controls.target.x)).toBeLessThanOrEqual(maxWorldDx);
+  });
+
+  test("panning solidly past a tile boundary triggers a recenter (new tile mounts)", () => {
+    const requested: TileId[] = [];
+    const v = createMapView({ requestRegion: (t) => requested.push(t) });
+    const center: TileId = { face: 0, level: 3, ix: 4, iy: 4 };
+    v.beginRegion(center);
+    const requestedAfterBegin = requested.length;
+    // Move solidly past the +X tile boundary (beyond 0.5 + hysteresis tiles).
+    v.controls.target.set(0.7 * MAP_VOXEL_EXTENT, 0, 0);
+    v.render({ render: () => {} } as unknown as THREE.WebGLRenderer);
+    // A recenter re-requests the newly-exposed ring edge — more requests than
+    // beginRegion alone issued.
+    expect(requested.length).toBeGreaterThan(requestedAfterBegin);
   });
 });

@@ -235,7 +235,7 @@ function mountViews(
   // The map view: the flat rung below the globe, backed by a same-face
   // neighbor-tile ring (The Excursion) fetched through the same worker
   // bridge the globe's own region tiles use.
-  const mapView = createMapView({ requestRegion });
+  const mapView = createMapView({ requestRegion, domElement: mapCanvas });
 
   const globeView = createGlobeView(tiles, system, eclipses.events, requestRegion);
   globeScene.add(globeView.object3d);
