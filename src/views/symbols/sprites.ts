@@ -72,29 +72,6 @@ export function buildTreeMaterial(): THREE.SpriteMaterial {
   }, 0x3f7d3f);
 }
 
-/** Stylized `~~` wave-mark texture for ocean tiles — two short wavy strokes
- * in light cyan, matching the pixel-art-RPG convention for open sea. */
-export function buildWaveMaterial(): THREE.SpriteMaterial {
-  return buildSymbolMaterial((ctx, size) => {
-    ctx.lineCap = 'round';
-    const drawWave = (yBase: number, style: string, width: number): void => {
-      ctx.strokeStyle = style;
-      ctx.lineWidth = width;
-      ctx.beginPath();
-      ctx.moveTo(size * 0.08, yBase);
-      ctx.quadraticCurveTo(size * 0.3, yBase - size * 0.1, size * 0.5, yBase);
-      ctx.quadraticCurveTo(size * 0.7, yBase + size * 0.1, size * 0.92, yBase);
-      ctx.stroke();
-    };
-    // A darker halo first, then a bright stroke on top — reads on both the
-    // light shallows and the deep ocean.
-    for (const y of [size * 0.4, size * 0.64]) {
-      drawWave(y, 'rgba(20,52,96,0.55)', size * 0.22);
-      drawWave(y, 'rgba(238,250,255,0.95)', size * 0.12);
-    }
-  }, 0xe8f6ff);
-}
-
 /** Volcano glyph: a dark cone with a red/orange lava top — the rarest
  * biome-signature icon (high unrest atop a high peak). */
 export function buildVolcanoMaterial(): THREE.SpriteMaterial {

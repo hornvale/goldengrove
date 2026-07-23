@@ -26,7 +26,6 @@ import {
   buildPeakMaterial,
   buildTreeMaterial,
   buildVolcanoMaterial,
-  buildWaveMaterial,
   hash01,
 } from './symbols/sprites';
 
@@ -131,7 +130,6 @@ export function buildMapSymbols(region: RegionScene): MapSymbols {
 
   const peakMaterial = buildPeakMaterial();
   const treeMaterial = buildTreeMaterial();
-  const waveMaterial = buildWaveMaterial();
   const volcanoMaterial = buildVolcanoMaterial();
   const cactusMaterial = buildCactusMaterial();
   const mushroomMaterial = buildMushroomMaterial();
@@ -143,7 +141,7 @@ export function buildMapSymbols(region: RegionScene): MapSymbols {
     material: THREE.SpriteMaterial,
     gx: number,
     gy: number,
-    kind: 'peak' | 'tree' | 'wave' | 'icon',
+    kind: 'peak' | 'tree' | 'icon',
     icon?: BiomeIcon,
   ): void {
     const sprite = new THREE.Sprite(material);
@@ -199,18 +197,6 @@ export function buildMapSymbols(region: RegionScene): MapSymbols {
       }
     }
 
-    // Wave marks: sparse cartographic sea-texture, gated by the rung's
-    // stride/cap. Deterministic grid walk — no jitter, no Math.random.
-    let waveCount = 0;
-    waveScan: for (let gy = 0; gy < dim; gy += b.waveStride) {
-      for (let gx = 0; gx < dim; gx += b.waveStride) {
-        if (waveCount >= b.waves) break waveScan;
-        if (!region.ocean[gy * dim + gx]) continue;
-        place(waveMaterial, gx, gy, 'wave');
-        waveCount++;
-      }
-    }
-
     // Biome-signature icons (volcano/cactus/mushroom): a closest-detail tier
     // only, so a zoomed-out map isn't cluttered with glyphs finer than the
     // peak/forest symbols already carry. Deterministic grid-order stride
@@ -233,7 +219,7 @@ export function buildMapSymbols(region: RegionScene): MapSymbols {
 
   function dispose(): void {
     while (group.children.length > 0) group.remove(group.children[0]!);
-    for (const material of [peakMaterial, treeMaterial, waveMaterial, volcanoMaterial, cactusMaterial, mushroomMaterial]) {
+    for (const material of [peakMaterial, treeMaterial, volcanoMaterial, cactusMaterial, mushroomMaterial]) {
       material.map?.dispose();
       material.dispose();
     }
