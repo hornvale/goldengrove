@@ -575,6 +575,17 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     const offset = sameFaceOffset(centerAddr, originAddr!)!;
     const [x, y, z] = worldPointForOffset(offset.dx, offset.dy);
     controls.target.set(x, y, z);
+    // applyIsoCamera/applyPixelCamera (above) just hard-set camera.position
+    // to the origin-assuming pose (iso: (d, d, d); pixel: (0, 0, 10)) — i.e.
+    // the correct relative offset from a target AT THE ORIGIN. Translating
+    // controls.target alone (above) without also translating camera.position
+    // by the same (x, y, z) would leave the camera looking at the right
+    // target from the WRONG position: still offset from the ORIGIN rather
+    // than from the new target, shearing the view off-axis by however far
+    // the center has drifted. Applying the same offset to both restores the
+    // exact iso/straight-down direction, just recentered on the new target
+    // (see The Excursion's final-review fix, round 2).
+    camera.position.add(new THREE.Vector3(x, y, z));
     controls.update();
   }
 

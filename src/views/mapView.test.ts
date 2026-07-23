@@ -421,4 +421,53 @@ describe("camera pan/zoom (The Excursion)", () => {
     v.setStyle("voxel");
     expect(v.controls.target.toArray()).toEqual([1 * MAP_VOXEL_EXTENT, 0, -1 * MAP_VOXEL_EXTENT]);
   });
+
+  // Final-review fix, round 2: the FIRST fix above re-anchored
+  // `controls.target` but left `camera.position` at the origin-assuming pose
+  // `applyIsoCamera`/`applyPixelCamera` had just hard-set — looking at the
+  // right target from the WRONG position (still offset from the origin, not
+  // the recentered target), which shears the view off-axis. This test would
+  // have passed under that incomplete fix (target moved correctly) but must
+  // fail unless `camera.position` ALSO moved by the same offset.
+  test("setStyle also translates camera.position by the same offset as controls.target, keeping the iso/straight-down pose anchored on the new target", () => {
+    const v = createMapView({ requestRegion: () => {} });
+    const center: TileId = { face: 0, level: 3, ix: 4, iy: 4 };
+    v.beginRegion(center);
+    v.onRegion(tileKey(center), fakeRegionAt(center));
+    // Recenter one tile east AND one tile "south" (dx=1, dy=1) — same
+    // maneuver as the controls.target re-anchor test above.
+    v.controls.target.set(0.7 * MAP_VOXEL_EXTENT, 0, -0.7 * MAP_VOXEL_EXTENT);
+    v.render({ render: () => {} } as unknown as THREE.WebGLRenderer);
+    const recentered: TileId = { face: 0, level: 3, ix: 5, iy: 5 };
+    v.onRegion(tileKey(recentered), fakeRegionAt(recentered));
+
+    v.setStyle("pixel");
+    // applyPixelCamera hard-sets position to (0, 0, 10), assuming target is
+    // at the origin. setStyle must translate it by the SAME (dx=1, dy=1)
+    // offset applied to controls.target, so position ends up 10 world units
+    // straight "up" from the recentered target — not still hovering over the
+    // origin. `controls.update()`'s internal spherical round-trip introduces
+    // a few ULPs of floating-point noise even on a mathematical no-op (see
+    // "setStyle('pixel') restores the exact pixel plane + top-down camera",
+    // above), so this compares component-wise with toBeCloseTo rather than
+    // an exact array toEqual.
+    expect(v.camera.position.x).toBeCloseTo(1 * MAP_VOXEL_EXTENT);
+    expect(v.camera.position.y).toBeCloseTo(-1 * MAP_VOXEL_EXTENT);
+    expect(v.camera.position.z).toBeCloseTo(10);
+    const pixelOffsetFromTarget = v.camera.position.clone().sub(v.controls.target);
+    expect(pixelOffsetFromTarget.x).toBeCloseTo(0);
+    expect(pixelOffsetFromTarget.y).toBeCloseTo(0);
+    expect(pixelOffsetFromTarget.z).toBeCloseTo(10);
+
+    v.setStyle("voxel");
+    // Same requirement for the isometric pose: position stays offset from
+    // the (new) target by (d, d, d), the true isometric direction.
+    expect(v.camera.position.x).toBeCloseTo(ISO_CAMERA_DISTANCE + 1 * MAP_VOXEL_EXTENT);
+    expect(v.camera.position.y).toBeCloseTo(ISO_CAMERA_DISTANCE);
+    expect(v.camera.position.z).toBeCloseTo(ISO_CAMERA_DISTANCE - 1 * MAP_VOXEL_EXTENT);
+    const isoOffsetFromTarget = v.camera.position.clone().sub(v.controls.target);
+    expect(isoOffsetFromTarget.x).toBeCloseTo(ISO_CAMERA_DISTANCE);
+    expect(isoOffsetFromTarget.y).toBeCloseTo(ISO_CAMERA_DISTANCE);
+    expect(isoOffsetFromTarget.z).toBeCloseTo(ISO_CAMERA_DISTANCE);
+  });
 });
