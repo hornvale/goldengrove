@@ -97,7 +97,18 @@ describe("MapStyle switch (The Diorama)", () => {
       (c) => c instanceof THREE.Mesh,
     ) as THREE.Mesh;
     expect(mesh.geometry).toBeInstanceOf(THREE.PlaneGeometry);
-    expect(v.camera.position.toArray()).toEqual([0, 0, 10]);
+    // Final-review fix: setStyle now re-syncs controls.target and calls
+    // controls.update() (a fresh region's center offset is (0, 0), so the
+    // target itself is exactly (0, 0, 0) — see the target assertion below);
+    // update()'s internal spherical round-trip introduces a few ULPs of
+    // floating-point noise into camera.position even when it's
+    // mathematically a no-op, so this compares component-wise with
+    // toBeCloseTo (matching "voxel style sets the fixed-isometric camera
+    // pose", above) instead of an exact array toEqual.
+    expect(v.camera.position.x).toBeCloseTo(0);
+    expect(v.camera.position.y).toBeCloseTo(0);
+    expect(v.camera.position.z).toBeCloseTo(10);
+    expect(v.controls.target.toArray()).toEqual([0, 0, 0]);
   });
 
   test("setStyle('voxel') after pixel restores the isometric pose and voxel mesh", () => {
@@ -109,11 +120,11 @@ describe("MapStyle switch (The Diorama)", () => {
       (c) => c instanceof THREE.Mesh,
     ) as THREE.Mesh;
     expect(mesh.geometry).not.toBeInstanceOf(THREE.PlaneGeometry);
-    expect(v.camera.position.toArray()).toEqual([
-      ISO_CAMERA_DISTANCE,
-      ISO_CAMERA_DISTANCE,
-      ISO_CAMERA_DISTANCE,
-    ]);
+    // See the toBeCloseTo comment above — same controls.update() ULP noise.
+    expect(v.camera.position.x).toBeCloseTo(ISO_CAMERA_DISTANCE);
+    expect(v.camera.position.y).toBeCloseTo(ISO_CAMERA_DISTANCE);
+    expect(v.camera.position.z).toBeCloseTo(ISO_CAMERA_DISTANCE);
+    expect(v.controls.target.toArray()).toEqual([0, 0, 0]);
   });
 
   test("setStyle applies the camera pose even with no region mounted", () => {
@@ -248,6 +259,31 @@ describe("neighbor-tile ring (The Excursion)", () => {
 });
 
 describe("camera pan/zoom (The Excursion)", () => {
+  // Local to this describe block, same shape as the sibling "neighbor-tile
+  // ring" describe's own `fakeRegionAt` (that one is scoped to its own
+  // block, not reachable here).
+  function fakeRegionAt(tile: TileId, samples = 4): RegionScene {
+    const n = (samples + 1) * (samples + 1);
+    return {
+      schema: "scene/tiles-region/v1",
+      seed: 42,
+      face: tile.face,
+      level: tile.level,
+      ix: tile.ix,
+      iy: tile.iy,
+      samples,
+      sea_level_m: 0,
+      season_period_days: 360,
+      circulationBands: 3,
+      biomeLegend: ["deep-ocean", "temperate-forest"],
+      elevation_m: Array.from({ length: n }, () => 100),
+      ocean: Array.from({ length: n }, () => false),
+      biome: Array.from({ length: n }, () => 1),
+      plate: Array.from({ length: n }, () => 0),
+      unrest: Array.from({ length: n }, () => 0),
+    } as unknown as RegionScene;
+  }
+
   test("MapControls is attached with rotation disabled", () => {
     const v = createMapView({ requestRegion: () => {} });
     expect(v.controls.enableRotate).toBe(false);
@@ -340,5 +376,49 @@ describe("camera pan/zoom (The Excursion)", () => {
     vRecenter.controls.target.set(0, -0.7 * MAP_VOXEL_EXTENT, 0);
     vRecenter.render({ render: () => {} } as unknown as THREE.WebGLRenderer);
     expect(requested.length).toBeGreaterThan(requestedAfterBegin);
+  });
+
+  // Final-review fix: `controls.target` persists across `setStyle`/
+  // `beginRegion`/`setRegion` calls (it's a `THREE.Vector3` the view never
+  // recreates), so a pan from a PRIOR visit/style could leak into the next
+  // one unless each of these three explicitly re-anchors it.
+  test("a fresh beginRegion re-anchors controls.target to the origin, not wherever a prior pan left it", () => {
+    const v = createMapView({ requestRegion: () => {} });
+    const center: TileId = { face: 0, level: 3, ix: 4, iy: 4 };
+    v.beginRegion(center);
+    // Pan away from the origin within this visit.
+    v.controls.target.set(0.8 * MAP_VOXEL_EXTENT, 0, 0.4 * MAP_VOXEL_EXTENT);
+    // A fresh visit to a new region (e.g. re-entering the Map view) must not
+    // inherit that stale pan.
+    const elsewhere: TileId = { face: 2, level: 3, ix: 1, iy: 1 };
+    v.beginRegion(elsewhere);
+    expect(v.controls.target.toArray()).toEqual([0, 0, 0]);
+  });
+
+  test("setStyle re-anchors controls.target to the current center's world point under the new style's axis convention", () => {
+    const v = createMapView({ requestRegion: () => {} });
+    const center: TileId = { face: 0, level: 3, ix: 4, iy: 4 };
+    v.beginRegion(center);
+    v.onRegion(tileKey(center), fakeRegionAt(center));
+    // Recenter one tile east AND one tile "south" (+dx, +dy) by panning
+    // solidly past both boundaries at once — a nonzero dy is essential here:
+    // it's the axis pixel and voxel disagree on (Y vs Z, with the same
+    // negation), so a dx-only recenter can't distinguish "re-anchored
+    // correctly" from "leftover on the wrong axis".
+    v.controls.target.set(0.7 * MAP_VOXEL_EXTENT, 0, -0.7 * MAP_VOXEL_EXTENT);
+    v.render({ render: () => {} } as unknown as THREE.WebGLRenderer);
+    const recentered: TileId = { face: 0, level: 3, ix: 5, iy: 5 };
+    v.onRegion(tileKey(recentered), fakeRegionAt(recentered));
+
+    // Switching style must re-anchor target to the recentered tile's offset
+    // (dx=1, dy=1) under the NEW style's axis convention — Y for pixel, Z
+    // for voxel — not leave it at the old style's raw (stale, mid-pan)
+    // coordinates, and not leave the OFF-plane axis contaminated with a
+    // leftover value from before the switch.
+    v.setStyle("pixel");
+    expect(v.controls.target.toArray()).toEqual([1 * MAP_VOXEL_EXTENT, -1 * MAP_VOXEL_EXTENT, 0]);
+
+    v.setStyle("voxel");
+    expect(v.controls.target.toArray()).toEqual([1 * MAP_VOXEL_EXTENT, 0, -1 * MAP_VOXEL_EXTENT]);
   });
 });

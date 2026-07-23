@@ -368,11 +368,21 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
    * row/iy → decreasing world Y) across tile boundaries too, so a tile's
    * own row ordering and the ring's tile ordering agree. */
   function positionAt(object: THREE.Object3D, dx: number, dy: number): void {
+    const [x, y, z] = worldPointForOffset(dx, dy);
+    object.position.set(x, y, z);
+  }
+
+  /** The world-space point for a same-face tile offset `(dx, dy)` from
+   * `originAddr`, under the CURRENT `activeStyle`'s axis convention — the
+   * same formula `positionAt` applies to a mesh's `position`, factored out
+   * so `setStyle` can apply it directly to `controls.target` (a bare
+   * `THREE.Vector3`, not an `Object3D`) when re-anchoring the pan target to
+   * the current center tile (see the final-review fix, below). */
+  function worldPointForOffset(dx: number, dy: number): [number, number, number] {
     if (activeStyle === "voxel") {
-      object.position.set(dx * MAP_VOXEL_EXTENT, 0, -dy * MAP_VOXEL_EXTENT);
-    } else {
-      object.position.set(dx * MAP_VOXEL_EXTENT, -dy * MAP_VOXEL_EXTENT, 0);
+      return [dx * MAP_VOXEL_EXTENT, 0, -dy * MAP_VOXEL_EXTENT];
     }
+    return [dx * MAP_VOXEL_EXTENT, -dy * MAP_VOXEL_EXTENT, 0];
   }
 
   /** Mount (or remount, replacing any existing mesh at `key`) one ring
@@ -432,6 +442,13 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     regionPending.clear();
     originAddr = tile;
     centerAddr = tile;
+    // A fresh region visit mounts the new center tile at local origin (offset
+    // (0, 0) — see mountTileAt), so the pan target re-anchors there too,
+    // rather than inheriting wherever a PRIOR visit's pan left it (see The
+    // Excursion's final-review fix: a stale target here fed clampPan/
+    // maybeRecenter and could immediately recenter onto the wrong neighbor).
+    controls.target.set(0, 0, 0);
+    controls.update();
     requestMissing(ringAddresses(tile, MAP_RING_RADIUS));
   }
 
@@ -527,6 +544,10 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     const addr: TileId = { face: region.face, level: region.level, ix: region.ix, iy: region.iy };
     originAddr = addr;
     centerAddr = addr;
+    // Same re-anchor as beginRegion, above: this is also a fresh region
+    // visit, with the new center tile mounted at local origin.
+    controls.target.set(0, 0, 0);
+    controls.update();
     const key = tileKey(addr);
     regionCache.set(key, region);
     mountTileAt(key, region, true);
@@ -536,13 +557,25 @@ export function createMapView(options: CreateMapViewOptions = {}): MapView {
     activeStyle = style;
     if (style === "voxel") applyIsoCamera();
     else applyPixelCamera();
-    if (!centerAddr) return;
+    if (!centerAddr) return; // nothing mounted yet — no center tile to re-anchor to
     const centerKey = tileKey(centerAddr);
     for (const key of [...mounted.keys()]) {
       const cached = regionCache.get(key);
       if (!cached) continue; // shouldn't happen (a mounted tile is always cached) but stay defensive
       mountTileAt(key, cached, key === centerKey); // replaces the old style's mesh internally
     }
+    // Re-anchor the pan target to the current center tile's origin-relative
+    // world point under the NEW style's axis convention — applyIsoCamera/
+    // applyPixelCamera (above) pose the camera assuming target is (0, 0, 0),
+    // which is only true right after a fresh setRegion/beginRegion; if the
+    // user has recentered since, the stale target (still expressed in the
+    // OLD style's axis, and possibly nonzero on the axis the new style
+    // doesn't even clamp) would otherwise persist and fight `render`'s
+    // `controls.update()` (see The Excursion's final-review fix).
+    const offset = sameFaceOffset(centerAddr, originAddr!)!;
+    const [x, y, z] = worldPointForOffset(offset.dx, offset.dy);
+    controls.target.set(x, y, z);
+    controls.update();
   }
 
   function render(renderer: THREE.WebGLRenderer): void {
